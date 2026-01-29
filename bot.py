@@ -77,6 +77,13 @@ def bilingual_draw(draw, x, y, value, font_main, font_small):
 # ======================
 
 async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+   print("🟢 handle_pdf function CALLED")
+    doc = update.message.document
+    if not doc.file_name.lower().endswith(".pdf"):
+        print("❌ File is not a PDF")
+        await update.message.reply_text("❌ Please send a Fayda ID PDF file.")
+        return
+    print("✅ File is a PDF. Starting download...")
     doc = update.message.document
     if not doc.file_name.lower().endswith(".pdf"):
         await update.message.reply_text("❌ Please send a Fayda ID PDF file.")
@@ -143,7 +150,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Send your Fayda National ID PDF and I will generate a printable ID image."
     )
-
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Temporary handler to debug document reception."""
+    doc = update.message.document
+    print(f"📁 DEBUG: Received a document!")
+    print(f"    File Name: {doc.file_name}")
+    print(f"    MIME Type: {doc.mime_type}")
+    print(f"    File Size: {doc.file_size} bytes")
+    
+    # Check if it's a PDF
+    if doc.file_name and doc.file_name.lower().endswith('.pdf'):
+        print("    ✅ This is a PDF. Calling the original handler...")
+        # Call your original processing function
+        await handle_pdf(update, context)
+    else:
+        await update.message.reply_text("❌ Please send a PDF file.")
 def main():
     BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -153,7 +174,7 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.Document.PDF, handle_pdf))
+app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 
     print("🤖 Bot started...")
     app.run_polling()
