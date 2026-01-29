@@ -1,5 +1,6 @@
 python-telegram-bot==20.7
-pdfplumber
+pdfplumber>=0.10.3
+Pillow>=10.0.0
 pytesseract
 Pillow
 pdf2image
