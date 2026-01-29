@@ -145,8 +145,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 def main():
+    import sys
+    import traceback
+    try:
     BOT_TOKEN = os.getenv("BOT_TOKEN")
-
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN is not set")
 
