@@ -2,7 +2,13 @@ import os
 import re
 import pdfplumber
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    Application,
+    MessageHandler,
+    CommandHandler,
+    ContextTypes,
+    filters,
+)
 from PIL import Image, ImageDraw, ImageFont
 
 # ======================
@@ -133,6 +139,10 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ======================
 # BOOTSTRAP
 # ======================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 Send your Fayda National ID PDF and I will generate a printable ID image."
+    )
 
 def main():
     BOT_TOKEN = os.getenv("BOT_TOKEN")
