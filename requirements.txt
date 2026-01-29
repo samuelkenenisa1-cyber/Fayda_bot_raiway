@@ -1,7 +1,5 @@
 python-telegram-bot==20.7
-pdfplumber
 pytesseract
-pdf2image
 Pillow
-pyzbar
-opencv-python
+pdf2image
+opencv-python-headless
