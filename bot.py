@@ -15,7 +15,6 @@ from PIL import Image, ImageDraw, ImageFont
 # CONFIG
 # ======================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
 TEMPLATE_PATH = "template.png"
 FONT_PATH = "font.ttf"
 
@@ -51,14 +50,13 @@ def parse_fayda(text: str):
         "sex": "",
         "expiry": "",
         "issue": "",
-        "fan": "",  # This should be FCN in your PDF
+        "fan": "",
         "fin": "",
         "phone": "",
         "nationality": "",
         "address": "",
     }
     
-    # Debug: Print all lines to see what we're working with
     print("=== DEBUG: PDF LINES ===")
     for i, line in enumerate(lines):
         print(f"Line {i}: {line}")
@@ -79,14 +77,11 @@ def parse_fayda(text: str):
     # Extract Date of Birth
     for line in lines:
         if "የትውልድ ቀን" in line or "Date of Birth" in line:
-            # Get everything after the label
             if "/" in line:
                 parts = line.split("/", 1)
                 if len(parts) > 1:
                     data["dob"] = parts[1].strip()
             else:
-                # Try to extract date pattern
-                import re
                 dates = re.findall(r'\d{2}/\d{2}/\d{4}', line)
                 if dates:
                     data["dob"] = dates[0]
@@ -95,7 +90,6 @@ def parse_fayda(text: str):
     # Extract Sex
     for i, line in enumerate(lines):
         if "SEX" in line or "+ /" in line:
-            # Look for Male/Female in this line or next
             if "Male" in line or "Female" in line:
                 data["sex"] = "Male" if "Male" in line else "Female"
             elif i + 1 < len(lines):
@@ -107,8 +101,6 @@ def parse_fayda(text: str):
     # Extract Phone
     for line in lines:
         if "ስልክ" in line or "Phone Number" in line:
-            # Try to find phone number (10 digits)
-            import re
             phone_match = re.search(r'\d{10}', line)
             if phone_match:
                 data["phone"] = phone_match.group(0)
@@ -144,38 +136,40 @@ def bilingual_draw(draw, x, y, value, font_main, font_small):
 # ======================
 
 async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
-     print("🟢 handle_pdf function CALLED")
+    print("🟢 handle_pdf function CALLED")
     doc = update.message.document
     print(f"📄 File name: {doc.file_name}")
+    
     if not doc.file_name.lower().endswith(".pdf"):
         print("❌ File is not a PDF")
         await update.message.reply_text("❌ Please send a Fayda ID PDF file.")
         return
+    
     print("✅ File is a PDF. Starting download...")
 
     file = await doc.get_file()
     await file.download_to_drive("id.pdf")
 
-    # ---- Extract text from PDF
+    # Extract text from PDF
     text = ""
     with pdfplumber.open("id.pdf") as pdf:
         for page in pdf.pages:
             text += page.extract_text() or ""
-             print("=== RAW PDF TEXT ===")
-    print(text[:500])  # Print first 500 chars
+
+    print("=== RAW PDF TEXT ===")
+    print(text[:500])
     print("=== END TEXT ===")
+
     data = parse_fayda(text)
 
-    # ---- Load template
+    # Load template
     img = Image.open(TEMPLATE_PATH).convert("RGBA")
     draw = ImageDraw.Draw(img)
 
     font_main = ImageFont.truetype(FONT_PATH, 26)
     font_small = ImageFont.truetype(FONT_PATH, 22)
 
-    # ======================
     # FRONT SIDE
-    # ======================
     bilingual_draw(draw, 420, 215, data["name"], font_main, font_small)
     bilingual_draw(draw, 420, 265, data["dob"], font_main, font_small)
     bilingual_draw(draw, 420, 315, data["sex"], font_main, font_small)
@@ -189,22 +183,20 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
         position=(35, 300)
     )
 
-    # ======================
     # BACK SIDE
-    # ======================
     bilingual_draw(draw, 1150, 160, data["phone"], font_main, font_small)
     bilingual_draw(draw, 1150, 225, data["nationality"], font_main, font_small)
     bilingual_draw(draw, 1150, 300, data["address"], font_main, font_small)
 
     draw.text((1150, 525), data["fin"], fill="#000000", font=font_main)
 
-    # ---- Save output
+    # Save output
     output_path = "final_id.png"
     img.save(output_path)
 
     await update.message.reply_photo(photo=open(output_path, "rb"))
 
-    # ---- Cleanup
+    # Cleanup
     for f in ["id.pdf", output_path]:
         if os.path.exists(f):
             os.remove(f)
@@ -212,6 +204,7 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ======================
 # BOOTSTRAP
 # ======================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Send your Fayda National ID PDF and I will generate a printable ID image."
