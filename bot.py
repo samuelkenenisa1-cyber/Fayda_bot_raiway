@@ -1,6 +1,10 @@
 import os
 import re
 import pdfplumber
+import pytesseract
+from pdf2image import convert_from_path
+import cv2
+import numpy as np
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -33,41 +37,45 @@ def split_bilingual(value: str):
         return am.strip(), en.strip()
     return value.strip(), value.strip()
 
-def extract_field(lines, keys):
-    """Extract field value from text lines."""
+def extract_fuzzy(lines, keywords, max_distance=1):
     for i, line in enumerate(lines):
-        for key in keys:
-            if key in line:
-                if ":" in line:
-                    return line.split(":", 1)[1].strip()
+        for key in keywords:
+            if key.lower() in line.lower():
+                # try same line
+                parts = re.split(r"[:\-]", line, 1)
+                if len(parts) > 1:
+                    return parts[1].strip()
+
+                # try next line
                 if i + 1 < len(lines):
                     return lines[i + 1].strip()
     return ""
 
-def parse_fayda(text: str):
-    """Extract data from Ethiopian Fayda ID text."""
-    lines = [normalize(l) for l in text.splitlines() if l.strip()]
-    
-    data = {
-        "name": "",
-        "dob": "",
-        "sex": "",
-        "expiry": "",  # Note: Not in standard Fayda ID
-        "issue": "",   # Note: Not in standard Fayda ID
-        "fan": "",     # FCN (Fayda Card Number)
-        "fin": "",     # Note: Not in standard Fayda ID
-        "phone": "",
-        "nationality": "",
-        "address": "",
-    }
+data["name"] = extract_fuzzy(lines, [
+    "First, Middle, Surname",
+    "መሉ ስሞ"
+])
+
+data["fan"] = extract_fuzzy(lines, ["FCN", "FAN"])
+
+data["dob"] = extract_fuzzy(lines, [
+    "Date of Birth",
+    "የትውልድ ቀን"
+])
+
+data["issue"] = extract_fuzzy(lines, [
+    "Date of Issue",
+    "የተሰጠበት ቀን"
+])
+
     
     print("=== DEBUG: PDF LINES ===")
     for i, line in enumerate(lines):
         print(f"Line {i}: {line}")
     
-    # Extract name (from "መት ስሞ / First, Middle, Surname")
+    # Extract name (from "መሉ ስሞ / First, Middle, Surname")
     for i, line in enumerate(lines):
-        if "መት ስሞ" in line or "First, Middle, Surname" in line:
+        if "መሉ ስሞ" in line or "First, Middle, Surname" in line:
             if i + 1 < len(lines):
                 data["name"] = lines[i + 1].strip()
                 print(f"✓ Found name: {data['name']}")
@@ -195,29 +203,37 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await file.download_to_drive("id.pdf")
         print("✅ PDF downloaded successfully")
         
-        # Extract text from PDF
-        text = ""
-        try:
-            with pdfplumber.open("id.pdf") as pdf:
-                print(f"📑 PDF has {len(pdf.pages)} page(s)")
-                
-                for i, page in enumerate(pdf.pages):
-                    # Try standard extraction
-                    page_text = page.extract_text() or ""
-                    
-                    # If no text, try with tolerance
-                    if not page_text.strip():
-                        page_text = page.extract_text(x_tolerance=2, y_tolerance=2) or ""
-                    
-                    # If still no text, try extracting words
-                    if not page_text.strip():
-                        words = page.extract_words()
-                        if words:
-                            page_text = " ".join([w['text'] for w in words])
-                    
-                    print(f"📄 Page {i+1}: Extracted {len(page_text)} characters")
-                    text += page_text + "\n"
-                    
+       # ===== PDF → IMAGE → OCR =====
+images = convert_from_path("id.pdf", dpi=300)
+
+ocr_text = ""
+
+for i, img in enumerate(images):
+    img_np = np.array(img)
+
+    # Convert to grayscale
+    gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
+
+    # Improve contrast
+    gray = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)[1]
+
+    # OCR (Amharic + English)
+    text = pytesseract.image_to_string(
+        gray,
+        lang="amh+eng",
+        config="--psm 6"
+    )
+
+    print(f"🧠 OCR page {i+1} chars:", len(text))
+    ocr_text += text + "\n"
+
+if not ocr_text.strip():
+    await update.message.reply_text("❌ Could not read ID text (OCR failed).")
+    return
+
+print("=== OCR TEXT SAMPLE ===")
+print(ocr_text[:1000])
+                 
         except Exception as pdf_error:
             print(f"❌ PDF extraction error: {pdf_error}")
             await update.message.reply_text("❌ Could not read the PDF. It might be scanned or corrupted.")
@@ -232,7 +248,7 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Parse the extracted data
-        data = parse_fayda(text)
+        data = parse_fayda(ocr_text)
         
         # Check if we got essential data
         if not data["name"] and not data["fan"]:
