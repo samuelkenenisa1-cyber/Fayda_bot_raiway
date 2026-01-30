@@ -77,17 +77,13 @@ def bilingual_draw(draw, x, y, value, font_main, font_small):
 # ======================
 
 async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
-   print("🟢 handle_pdf function CALLED")
+    print("🟢 handle_pdf function CALLED")
     doc = update.message.document
     if not doc.file_name.lower().endswith(".pdf"):
         print("❌ File is not a PDF")
         await update.message.reply_text("❌ Please send a Fayda ID PDF file.")
         return
     print("✅ File is a PDF. Starting download...")
-    doc = update.message.document
-    if not doc.file_name.lower().endswith(".pdf"):
-        await update.message.reply_text("❌ Please send a Fayda ID PDF file.")
-        return
 
     file = await doc.get_file()
     await file.download_to_drive("id.pdf")
@@ -150,6 +146,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Send your Fayda National ID PDF and I will generate a printable ID image."
     )
+
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Temporary handler to debug document reception."""
     doc = update.message.document
@@ -165,6 +162,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_pdf(update, context)
     else:
         await update.message.reply_text("❌ Please send a PDF file.")
+
 def main():
     BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -174,7 +172,10 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 
     print("🤖 Bot started...")
     app.run_polling()
+
+if __name__ == "__main__":
+    main()
