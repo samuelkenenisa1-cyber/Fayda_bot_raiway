@@ -1,7 +1,6 @@
 import os
 import re
 import pytesseract
-import cv2
 import numpy as np
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
