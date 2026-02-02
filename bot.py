@@ -1,27 +1,37 @@
 import os
 import re
+import asyncio
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 import pytesseract
-import numpy as np
 from telegram import Update
-from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
-from PIL import Image, ImageDraw, ImageFont
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-TEMPLATE_PATH = "template.png"
-FONT_PATH = "font.ttf"
+# ================= CONFIG =================
 
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TMP_DIR = os.path.join(BASE_DIR, "tmp")
+TEMPLATE_PATH = os.path.join(BASE_DIR, "template.png")
+FONT_PATH = os.path.join(BASE_DIR, "font.ttf")
+
+os.makedirs(TMP_DIR, exist_ok=True)
+
+# User session storage
 user_sessions = {}
 
 # ================= OCR =================
 
 def ocr_image(path: str) -> str:
-    img = Image.open(path).convert("L")   # grayscale
+    img = Image.open(path).convert("L")
 
-    # Improve contrast
-    enhancer = ImageEnhance.Contrast(img)
-    img = enhancer.enhance(2.0)
-
-    # Slight sharpening
+    img = ImageEnhance.Contrast(img).enhance(2.0)
     img = img.filter(ImageFilter.SHARPEN)
 
     text = pytesseract.image_to_string(
@@ -30,46 +40,105 @@ def ocr_image(path: str) -> str:
         config="--psm 6"
     )
     return text
-def extract(lines, keys):
-    for i, l in enumerate(lines):
-        for k in keys:
-            if k.lower() in l.lower():
-                parts = re.split(r"[:\-]", l, 1)
-                if len(parts) > 1:
-                    return parts[1].strip()
-                if i + 1 < len(lines):
-                    return lines[i + 1].strip()
+
+
+# ================= PARSING =================
+
+def extract(patterns, text):
+    for p in patterns:
+        m = re.search(p, text, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
     return ""
 
-def parse_front(text):
-    lines = text.splitlines()
+def parse_fayda(text: str) -> dict:
     return {
-        "name": extract(lines, ["First, Middle, Surname", "መሉ ስሞ"]),
-        "dob": extract(lines, ["Date of Birth", "የትውልድ ቀን"]),
-        "fan": extract(lines, ["FAN", "FCN"]),
-        "issue": extract(lines, ["Date of Issue", "የተሰጠበት ቀን"]),
-        "sex": "ወንድ | Male" if "Male" in text else "ሴት | Female" if "Female" in text else ""
+        "name": extract([
+            r"Name[:\s]*([A-Za-z\s]+)",
+            r"ስም[:\s]*([ሀ-ፐ\s]+)"
+        ], text),
+
+        "fan": extract([
+            r"FAN[:\s]*([A-Z0-9]+)"
+        ], text),
+
+        "fin": extract([
+            r"FIN[:\s]*([0-9]+)"
+        ], text),
+
+        "sin": extract([
+            r"SIN[:\s]*([0-9]+)"
+        ], text),
+
+        "nationality": extract([
+            r"Nationality[:\s]*([A-Za-z]+)",
+            r"ዜግነት[:\s]*([ሀ-ፐ]+)"
+        ], text),
+
+        "dob": extract([
+            r"Date of Birth[:\s]*([\d/.-]+)",
+            r"የትውልድ ቀን[:\s]*([\d/.-]+)"
+        ], text),
+
+        "address": extract([
+            r"Address[:\s]*(.+)",
+            r"አድራሻ[:\s]*(.+)"
+        ], text),
+
+        "phone": extract([
+            r"Phone[:\s]*(\+?\d+)"
+        ], text),
+
+        "issue_date": extract([
+            r"Date of Issue[:\s]*([\d/.-]+)",
+            r"የተሰጠበት ቀን[:\s]*([\d/.-]+)"
+        ], text),
     }
 
-def parse_back(text):
-    lines = text.splitlines()
-    phone = re.search(r"\b09\d{8}\b", text)
-    return {
-        "phone": phone.group() if phone else "",
-        "nationality": "ኢትዮጵያዊ | Ethiopian" if "Ethiopian" in text else "",
-        "address": extract(lines, ["Region", "Subcity", "Woreda"]),
-        "fin": extract(lines, ["FIN", "SIN"]),
+
+# ================= IMAGE GENERATION =================
+
+def generate_id(data: dict, photo_qr_path: str, output_path: str):
+    template = Image.open(TEMPLATE_PATH).convert("RGBA")
+    draw = ImageDraw.Draw(template)
+
+    font = ImageFont.truetype(FONT_PATH, 28)
+
+    # ---- TEXT POSITIONS (ADJUST TO YOUR TEMPLATE) ----
+    positions = {
+        "name": (280, 180),
+        "fan": (280, 230),
+        "fin": (280, 280),
+        "sin": (280, 330),
+        "nationality": (280, 380),
+        "dob": (280, 430),
+        "address": (280, 480),
+        "phone": (280, 530),
+        "issue_date": (40, 620),  # left edge
     }
 
-def draw_bilingual(draw, x, y, value, f1, f2):
-    if "|" in value:
-        am, en = value.split("|", 1)
-        draw.text((x, y), am.strip(), font=f1, fill="#000")
-        draw.text((x, y + 26), en.strip(), font=f2, fill="#000")
-    else:
-        draw.text((x, y), value, font=f1, fill="#000")
+    for key, pos in positions.items():
+        draw.text(pos, data.get(key, ""), fill="black", font=font)
 
-# ================= HANDLER =================
+    # ---- PHOTO + QR ----
+    pq = Image.open(photo_qr_path).convert("RGBA")
+    pq = pq.resize((220, 280))
+
+    template.paste(pq, (40, 180))
+
+    template.save(output_path)
+
+
+# ================= BOT HANDLERS =================
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_sessions[update.effective_user.id] = []
+    await update.message.reply_text(
+        "📄 Send Fayda ID screenshots in this order:\n"
+        "1️⃣ Front page\n"
+        "2️⃣ Back page\n"
+        "3️⃣ Photo + QR"
+    )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -79,107 +148,52 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     photo = update.message.photo[-1]
     file = await photo.get_file()
-    path = f"{user_id}_{len(user_sessions[user_id])}.jpg"
-    await file.download_to_drive(path)
 
-    user_sessions[user_id].append(path)
-    count = len(user_sessions[user_id])
+    user_dir = os.path.join(TMP_DIR, str(user_id))
+    os.makedirs(user_dir, exist_ok=True)
 
-    await update.message.reply_text(f"📸 Image {count}/3 received")
+    img_index = len(user_sessions[user_id]) + 1
+    img_path = os.path.join(user_dir, f"{img_index}.png")
 
-    if count < 3:
+    await file.download_to_drive(img_path)
+    user_sessions[user_id].append(img_path)
+
+    if img_index < 3:
+        await update.message.reply_text(f"✅ Image {img_index}/3 received")
         return
 
-    try:
-        await update.message.reply_text("🧠 Processing ID...")
+    await update.message.reply_text("⏳ Processing Fayda ID...")
 
+    try:
         front_text = ocr_image(user_sessions[user_id][0])
         back_text = ocr_image(user_sessions[user_id][1])
 
-        data = {}
-        data.update(parse_front(front_text))
-        data.update(parse_back(back_text))
+        data = parse_fayda(front_text + "\n" + back_text)
 
-        template = Image.open(TEMPLATE_PATH).convert("RGBA")
-        draw = ImageDraw.Draw(template)
+        output_path = os.path.join(user_dir, "final_id.png")
+        generate_id(data, user_sessions[user_id][2], output_path)
 
-        font_main = ImageFont.truetype(FONT_PATH, 26)
-        font_small = ImageFont.truetype(FONT_PATH, 22)
-
-        draw_bilingual(draw, 420, 215, data.get("name",""), font_main, font_small)
-        draw_bilingual(draw, 420, 265, data.get("dob",""), font_main, font_small)
-        draw_bilingual(draw, 420, 315, data.get("sex",""), font_main, font_small)
-        draw.text((220, 540), data.get("fan",""), font=font_small, fill="#000")
-
-        draw_bilingual(draw, 1150, 160, data.get("phone",""), font_main, font_small)
-        draw_bilingual(draw, 1150, 225, data.get("nationality",""), font_main, font_small)
-        draw_bilingual(draw, 1150, 300, data.get("address",""), font_main, font_small)
-
-        # Photo + QR
-        pq = Image.open(user_sessions[user_id][2]).convert("RGBA")
-        pq = pq.resize((300, 300))
-        template.paste(pq, (100, 150), pq)
-
-        out = f"{user_id}_final.png"
-        template.save(out)
-
-        await update.message.reply_photo(photo=open(out, "rb"), caption="✅ ID Generated")
+        await update.message.reply_photo(
+            photo=open(output_path, "rb"),
+            caption="✅ Fayda ID generated"
+        )
 
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
 
     finally:
-        for f in user_sessions[user_id]:
-            if os.path.exists(f):
-                os.remove(f)
-        if os.path.exists(out):
-            os.remove(out)
         user_sessions.pop(user_id, None)
-        
-user_sessions = {}
 
-async def handle_photo(update, context):
-    user_id = update.effective_user.id
-    photo = update.message.photo[-1]
-    file = await photo.get_file()
 
-    os.makedirs(f"tmp/{user_id}", exist_ok=True)
-    count = len(os.listdir(f"tmp/{user_id}")) + 1
-
-    path = f"tmp/{user_id}/{count}.png"
-    await file.download_to_drive(path)
-
-    if count < 3:
-        await update.message.reply_text(
-            f"📸 Image {count}/3 received. Send next image."
-        )
-        return
-
-    await update.message.reply_text("⏳ Processing Fayda ID...")
-
-    front_text = ocr_image(f"tmp/{user_id}/1.png")
-    back_text  = ocr_image(f"tmp/{user_id}/2.png")
-
-    # Parse data from front_text + back_text
-    data = parse_fayda(front_text + "\n" + back_text)
-
-    # Load template, paste photo + QR from image 3
-    # Draw text
-    # Send final PNG
-# ================= COMMANDS =================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📌 Send 3 screenshots in order:\n"
-        "1️⃣ Front page\n"
-        "2️⃣ Back page\n"
-        "3️⃣ Photo + QR"
-    )
+# ================= MAIN =================
 
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+
+    print("🤖 Fayda Bot is running...")
     app.run_polling()
 
 if __name__ == "__main__":
