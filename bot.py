@@ -14,17 +14,22 @@ user_sessions = {}
 
 # ================= OCR =================
 
-def ocr_image(path):
-    img = cv2.imread(path)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    gray = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)[1]
-    text = pytesseract.image_to_string(
-    image,
-    lang="amh+eng",
-    config="--psm 6"
-)
-    return text
+def ocr_image(path: str) -> str:
+    img = Image.open(path).convert("L")   # grayscale
 
+    # Improve contrast
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(2.0)
+
+    # Slight sharpening
+    img = img.filter(ImageFilter.SHARPEN)
+
+    text = pytesseract.image_to_string(
+        img,
+        lang="amh+eng",
+        config="--psm 6"
+    )
+    return text
 def extract(lines, keys):
     for i, l in enumerate(lines):
         for k in keys:
@@ -130,7 +135,37 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if os.path.exists(out):
             os.remove(out)
         user_sessions.pop(user_id, None)
+        
+user_sessions = {}
 
+async def handle_photo(update, context):
+    user_id = update.effective_user.id
+    photo = update.message.photo[-1]
+    file = await photo.get_file()
+
+    os.makedirs(f"tmp/{user_id}", exist_ok=True)
+    count = len(os.listdir(f"tmp/{user_id}")) + 1
+
+    path = f"tmp/{user_id}/{count}.png"
+    await file.download_to_drive(path)
+
+    if count < 3:
+        await update.message.reply_text(
+            f"📸 Image {count}/3 received. Send next image."
+        )
+        return
+
+    await update.message.reply_text("⏳ Processing Fayda ID...")
+
+    front_text = ocr_image(f"tmp/{user_id}/1.png")
+    back_text  = ocr_image(f"tmp/{user_id}/2.png")
+
+    # Parse data from front_text + back_text
+    data = parse_fayda(front_text + "\n" + back_text)
+
+    # Load template, paste photo + QR from image 3
+    # Draw text
+    # Send final PNG
 # ================= COMMANDS =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
