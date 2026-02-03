@@ -39,15 +39,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         "📄 *Fayda ID Bot*\n\n"
-        "Send me 3 screenshots in order:\n"
-        "1️⃣ Front page of ID\n"
-        "2️⃣ Back page of ID\n"
-        "3️⃣ Photo + QR code\n\n"
-        "⚠️ *Tips for best results:*\n"
-        "• Take clear, well-lit screenshots\n"
-        "• Ensure text is not blurry\n"
-        "• Capture entire ID sections\n"
-        "• Send images in correct order",
+        "Send me 3 screenshots in this order:\n"
+        "1️⃣ Front page of ID (text only)\n"
+        "2️⃣ Back page of ID (text only)\n"
+        "3️⃣ Photo + QR code page\n\n"
+        "I'll extract information and generate a formatted ID card.",
         parse_mode='Markdown'
     )
 
@@ -78,7 +74,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Show image info
     try:
         img = Image.open(img_path)
-        print(f"   Size: {img.size}, Mode: {img.mode}")
+        print(f"   Size: {img.size}")
     except:
         pass
     
@@ -97,32 +93,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Step 1: OCR on first image (front)
         await update.message.reply_text("🔍 Reading front page...")
-        print("\n--- FRONT PAGE OCR ---")
         front_text = ocr_image(user_sessions[user_id][0])
         
         # Step 2: OCR on second image (back)
         await update.message.reply_text("🔍 Reading back page...")
-        print("\n--- BACK PAGE OCR ---")
         back_text = ocr_image(user_sessions[user_id][1])
-        
-        # Combine texts
-        combined_text = f"FRONT:\n{front_text}\n\nBACK:\n{back_text}"
-        
-        # Save OCR output for debugging
-        debug_path = os.path.join(user_dir, "ocr_output.txt")
-        with open(debug_path, "w", encoding="utf-8") as f:
-            f.write(combined_text)
-        print(f"📁 OCR output saved to: {debug_path}")
-        
-        # Send OCR preview to user
-        preview = ""
-        if front_text:
-            preview += f"*Front page (first 300 chars):*\n```\n{front_text[:300]}\n```\n\n"
-        if back_text:
-            preview += f"*Back page (first 300 chars):*\n```\n{back_text[:300]}\n```"
-        
-        if preview:
-            await update.message.reply_text(preview, parse_mode='Markdown')
         
         # Parse the data
         await update.message.reply_text("📋 Extracting ID information...")
@@ -130,19 +105,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Show what we found
         found = {k: v for k, v in data.items() if v}
-        print(f"\n📊 FOUND {len(found)} FIELDS:")
-        for key, value in found.items():
-            print(f"   {key}: {value}")
         
-        if len(found) < 2:
+        if len(found) < 4:
             fields_list = ", ".join(found.keys()) if found else "nothing"
             await update.message.reply_text(
                 f"⚠️ *Only found: {fields_list}*\n\n"
-                f"Common issues:\n"
-                f"• Screenshots might be blurry\n"
-                f"• Text might be too small\n"
-                f"• Try retaking clearer screenshots\n\n"
-                f"*OCR extracted {len(front_text)+len(back_text)} characters total*",
+                f"Please send clearer screenshots.",
                 parse_mode='Markdown'
             )
             return
@@ -153,15 +121,21 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         success = generate_id(
             data, 
-            user_sessions[user_id][0],  # Front image
-            user_sessions[user_id][2],  # QR image
+            user_sessions[user_id][2],  # Third image has photo + QR
             output_path
         )
         
         if success:
+            # Create summary message
+            summary = f"✅ *ID Generated Successfully!*\n\n"
+            summary += f"*Extracted Data:*\n"
+            for key, value in found.items():
+                if value and len(value) < 50:  # Show shorter values
+                    summary += f"• *{key.title()}*: {value}\n"
+            
             await update.message.reply_photo(
                 photo=open(output_path, "rb"),
-                caption=f"✅ *ID Generated!*\nFound {len(found)} fields including:\n{', '.join(list(found.keys())[:3])}",
+                caption=summary,
                 parse_mode='Markdown'
             )
         else:
@@ -169,8 +143,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     except Exception as e:
         print(f"❌ ERROR: {e}")
-        import traceback
-        traceback.print_exc()
         await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
     
     finally:
@@ -187,80 +159,21 @@ def ocr_image(path: str) -> str:
         
         # Open image
         img = Image.open(path)
-        original_size = img.size
-        print(f"  Original size: {original_size}")
         
-        # Resize if too small (helps OCR)
-        if img.size[0] < 500 or img.size[1] < 500:
-            scale = 2.0
-            new_size = (int(img.size[0] * scale), int(img.size[1] * scale))
-            img = img.resize(new_size, Image.Resampling.LANCZOS)
-            print(f"  Resized to: {new_size}")
-        
-        # Convert to grayscale
-        img = img.convert('L')
-        
-        # Enhance contrast
+        # Enhance for better OCR
+        img = img.convert('L')  # Grayscale
         enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(2.5)  # Increased contrast
-        
-        # Sharpen
-        enhancer = ImageEnhance.Sharpness(img)
         img = enhancer.enhance(2.0)
         
-        # Try different OCR configurations
-        texts = []
+        # Try OCR with Amharic + English
+        text = pytesseract.image_to_string(
+            img,
+            lang='amh+eng',
+            config='--psm 6 --oem 3'
+        )
         
-        # Config 1: Amharic + English
-        try:
-            text1 = pytesseract.image_to_string(
-                img,
-                lang='amh+eng',
-                config='--psm 6 --oem 3'
-            )
-            texts.append(("amh+eng", text1))
-        except:
-            pass
-        
-        # Config 2: English only
-        try:
-            text2 = pytesseract.image_to_string(
-                img,
-                lang='eng',
-                config='--psm 6 --oem 3'
-            )
-            texts.append(("eng", text2))
-        except:
-            pass
-        
-        # Config 3: Auto page segmentation
-        try:
-            text3 = pytesseract.image_to_string(
-                img,
-                lang='amh+eng',
-                config='--psm 3 --oem 3'
-            )
-            texts.append(("auto", text3))
-        except:
-            pass
-        
-        # Choose the best result (most text)
-        best_text = ""
-        best_config = ""
-        for config, text in texts:
-            if len(text.strip()) > len(best_text.strip()):
-                best_text = text
-                best_config = config
-        
-        print(f"  Best config: {best_config}, Characters: {len(best_text)}")
-        
-        if best_text:
-            # Count Amharic characters
-            amh_chars = sum(1 for c in best_text if '\u1200' <= c <= '\u137F')
-            print(f"  Amharic characters: {amh_chars}")
-            print(f"  First 200 chars: {best_text[:200].replace(chr(10), ' ')}")
-        
-        return best_text.strip()
+        print(f"  Characters extracted: {len(text)}")
+        return text.strip()
         
     except Exception as e:
         print(f"❌ OCR failed: {e}")
@@ -269,7 +182,7 @@ def ocr_image(path: str) -> str:
 # ================= PARSING =================
 
 def parse_fayda(front_text: str, back_text: str) -> dict:
-    """Parse Ethiopian Fayda ID from OCR text (specific to your format)."""
+    """Parse Ethiopian Fayda ID from OCR text."""
     print("\n" + "="*60)
     print("🔍 PARSING OCR TEXT")
     print("="*60)
@@ -286,71 +199,45 @@ def parse_fayda(front_text: str, back_text: str) -> dict:
     lines = [line.strip() for line in all_text.split('\n') if line.strip()]
     
     print(f"📄 Total lines: {len(lines)}")
-    for i, line in enumerate(lines):
-        print(f"{i:2d}: {line}")
     
-    # ============================================
-    # 1. NAME - Look for "ሙሉ ስም | Full Name" pattern
-    # ============================================
+    # 1. NAME - "ሙሉ ስም | Full Name"
     for i, line in enumerate(lines):
-        if "ሙሉ ስም | Full Name" in line or "Full Name" in line:
-            # Your format shows name on next line
+        if "ሙሉ ስም | Full Name" in line:
             if i + 1 < len(lines):
                 name_line = lines[i + 1]
-                print(f"📍 Found name line: '{name_line}'")
-                
-                # Your format: "ሳሙኤል ቀነኒሳ ሰልባና 5 Samuel Kenenisa Selbana g"
-                # Extract Amharic and English parts
+                # Extract name parts
                 parts = name_line.split()
-                am_name_parts = []
-                en_name_parts = []
-                in_english = False
+                am_parts = []
+                en_parts = []
                 
                 for part in parts:
-                    # Check if part contains Amharic characters
-                    has_amharic = any('\u1200' <= c <= '\u137F' for c in part)
-                    has_latin = any('A' <= c <= 'Z' or 'a' <= c <= 'z' for c in part)
-                    
-                    if has_amharic and not in_english:
-                        am_name_parts.append(part)
-                    elif has_latin:
-                        in_english = True
-                        en_name_parts.append(part)
+                    # Check if part contains Amharic
+                    if any('\u1200' <= c <= '\u137F' for c in part):
+                        am_parts.append(part)
+                    elif any('A' <= c <= 'Z' or 'a' <= c <= 'z' for c in part):
+                        en_parts.append(part)
                 
-                if am_name_parts:
-                    data["name"] = " ".join(am_name_parts) + " | " + " ".join(en_name_parts)
+                if am_parts and en_parts:
+                    data["name"] = " ".join(am_parts) + " | " + " ".join(en_parts)
                     print(f"✅ Name: {data['name']}")
                 break
     
-    # ============================================
     # 2. DATE OF BIRTH - "የትውልድ ቀን | Date of Birth"
-    # ============================================
     for i, line in enumerate(lines):
-        if "የትውልድ ቀን | Date of Birth" in line or "Date of Birth" in line:
+        if "የትውልድ ቀን | Date of Birth" in line:
             if i + 1 < len(lines):
                 dob_line = lines[i + 1]
-                print(f"📍 Found DOB line: '{dob_line}'")
-                
-                # Your format: "07/10/1992 | 2000/Jun/14"
-                # Extract the Ethiopian date (first part)
-                if "|" in dob_line:
-                    eth_date = dob_line.split("|")[0].strip()
-                    data["dob"] = eth_date
+                # Extract first date (07/10/1992)
+                date_match = re.search(r'\d{2}/\d{2}/\d{4}', dob_line)
+                if date_match:
+                    data["dob"] = date_match.group()
                     print(f"✅ DOB: {data['dob']}")
-                else:
-                    # Try to find date pattern
-                    date_match = re.search(r'\d{2}/\d{2}/\d{4}', dob_line)
-                    if date_match:
-                        data["dob"] = date_match.group()
-                        print(f"✅ DOB: {data['dob']}")
                 break
     
-    # ============================================
-    # 3. SEX - "Sex" then "ወንድ | Male"
-    # ============================================
+    # 3. SEX - Look for "ወንድ | Male"
     for i, line in enumerate(lines):
-        if "Sex" in line or "ፆታ" in line:
-            # Your format shows sex on same line or next
+        if "Sex" in line:
+            # Check this line and next
             if "ወንድ | Male" in line or "Male" in line:
                 data["sex"] = "ወንድ | Male"
                 print(f"✅ Sex: {data['sex']}")
@@ -362,62 +249,39 @@ def parse_fayda(front_text: str, back_text: str) -> dict:
                     print(f"✅ Sex: {data['sex']}")
                     break
     
-    # ============================================
     # 4. EXPIRY DATE - "የሚያበቃበት ቀን | Date of Expiry"
-    # ============================================
     for i, line in enumerate(lines):
-        if "የሚያበቃበት ቀን | Date of Expiry" in line or "Date of Expiry" in line:
+        if "የሚያበቃበት ቀን | Date of Expiry" in line:
             if i + 1 < len(lines):
                 expiry_line = lines[i + 1]
-                print(f"📍 Found expiry line: '{expiry_line}'")
-                
-                # Extract date (first date pattern found)
                 date_match = re.search(r'\d{4}/\d{2}/\d{2}', expiry_line)
                 if date_match:
                     data["expiry"] = date_match.group()
                     print(f"✅ Expiry: {data['expiry']}")
                 break
     
-    # ============================================
     # 5. FAN/FCN - Look for card number
-    # ============================================
-    for i, line in enumerate(lines):
-        # Look for "ካርድ" followed by numbers (from your OCR: "ካርድ 503592")
+    for line in lines:
         if "ካርድ" in line:
-            # Extract all numbers from this line
+            # Extract longest number in the line
             numbers = re.findall(r'\d+', line)
             if numbers:
-                # Take the longest number (likely the FCN)
-                longest_num = max(numbers, key=len)
-                if len(longest_num) >= 12:  # FCN is usually 16 digits
-                    data["fan"] = longest_num
+                longest = max(numbers, key=len)
+                if len(longest) >= 12:
+                    data["fan"] = longest
                     print(f"✅ FCN: {data['fan']}")
                     break
     
-    # Also search for 16-digit pattern anywhere
-    if not data["fan"]:
-        for line in lines:
-            # Look for 16 consecutive digits
-            fan_match = re.search(r'(\d{16})', line.replace(" ", ""))
-            if fan_match:
-                data["fan"] = fan_match.group(1)
-                print(f"✅ FCN (pattern): {data['fan']}")
-                break
-    
-    # ============================================
     # 6. PHONE NUMBER - "ስልክ | Phone Number"
-    # ============================================
     for i, line in enumerate(lines):
-        if "ስልክ | Phone Number" in line or "Phone Number" in line:
-            # Your OCR shows: "ስልክ | Phone Number on 60103 wi |FIN"
-            # Extract phone number from this or next line
+        if "ስልክ | Phone Number" in line:
+            # Extract 10-digit number
             phone_match = re.search(r'(\d{10})', line)
             if phone_match:
                 data["phone"] = phone_match.group(1)
                 print(f"✅ Phone: {data['phone']}")
                 break
             
-            # Check next line
             if i + 1 < len(lines):
                 next_line = lines[i + 1]
                 phone_match = re.search(r'(\d{10})', next_line)
@@ -426,45 +290,35 @@ def parse_fayda(front_text: str, back_text: str) -> dict:
                     print(f"✅ Phone (next line): {data['phone']}")
                     break
     
-    # ============================================
     # 7. FIN - Look for "FIN" with numbers
-    # ============================================
     for line in lines:
         if "FIN" in line:
             # Extract numbers after FIN
-            fin_match = re.search(r'FIN\s*(\d{4}\s?\d{4}\s?\d{4}\s?\d{4}|\d{13,16})', line)
+            fin_match = re.search(r'FIN\s*(\d[\d\s]+)', line)
             if fin_match:
-                fin_num = fin_match.group(1).replace(" ", "")
+                fin_num = re.sub(r'\s+', '', fin_match.group(1))
                 if len(fin_num) >= 12:
                     data["fin"] = fin_num
                     print(f"✅ FIN: {data['fin']}")
                     break
     
-    # ============================================
     # 8. NATIONALITY - "ዜግነት | Nationality"
-    # ============================================
     for i, line in enumerate(lines):
-        if "ዜግነት | Nationality" in line or "Nationality" in line:
+        if "ዜግነት | Nationality" in line:
             if i + 1 < len(lines):
                 nat_line = lines[i + 1]
-                # Check if it contains "ኢትዮጵያ" or "Ethiopian"
                 if "ኢትዮጵያ" in nat_line or "Ethiopian" in nat_line:
                     data["nationality"] = "ኢትዮጵያ | Ethiopian"
                     print(f"✅ Nationality: {data['nationality']}")
                 break
     
-    # ============================================
     # 9. ADDRESS - "አድራሻ | Address"
-    # ============================================
     address_lines = []
     for i, line in enumerate(lines):
-        if "አድራሻ | Address" in line or "Address" in line:
-            # Collect next few lines for address
-            for j in range(i + 1, min(i + 5, len(lines))):
+        if "አድራሻ | Address" in line:
+            # Collect next 3 lines
+            for j in range(i + 1, min(i + 4, len(lines))):
                 addr_line = lines[j]
-                # Stop if we hit another field
-                if any(keyword in addr_line for keyword in ["ስም", "Name", "Date", "Phone", "FIN", "Nationality"]):
-                    break
                 if addr_line.strip() and len(addr_line.strip()) > 2:
                     address_lines.append(addr_line.strip())
             
@@ -473,28 +327,13 @@ def parse_fayda(front_text: str, back_text: str) -> dict:
                 print(f"✅ Address: {data['address'][:50]}...")
             break
     
-    # ============================================
-    # 10. SN (SERIAL NUMBER) - Look near barcode
-    # ============================================
-    # SN is often near barcode or as a separate number
+    # 10. SN - Look for serial number
     for line in lines:
-        # Look for patterns like "SN: 123456" or serial numbers
-        sn_match = re.search(r'(?:SN|Serial)[:\s]*(\d+)', line, re.IGNORECASE)
-        if sn_match:
-            data["sin"] = sn_match.group(1)
-            print(f"✅ SN: {data['sin']}")
-            break
-    
-    # ============================================
-    # 11. DATE OF ISSUE - Might be on right side
-    # ============================================
-    # Look for issue date patterns
-    for line in lines:
-        if "የተሰጠበት ቀን" in line or "Date of Issue" in line:
-            date_match = re.search(r'\d{4}/\d{2}/\d{2}', line)
-            if date_match:
-                data["issue_date"] = date_match.group()
-                print(f"✅ Issue Date: {data['issue_date']}")
+        if "SN" in line or "Serial" in line:
+            sn_match = re.search(r'(?:SN|Serial)[:\s]*(\d+)', line, re.IGNORECASE)
+            if sn_match:
+                data["sin"] = sn_match.group(1)
+                print(f"✅ SN: {data['sin']}")
                 break
     
     print("\n" + "="*60)
@@ -503,96 +342,181 @@ def parse_fayda(front_text: str, back_text: str) -> dict:
     for key, value in data.items():
         if value:
             print(f"✅ {key:12}: {value}")
-        else:
-            print(f"❌ {key:12}: Not found")
     
     return data
+
 # ================= IMAGE GENERATION =================
 
-def generate_id(data: dict, photo_path: str, qr_path: str, output_path: str):
-    """Generate ID card with extracted data."""
+def generate_id(data: dict, photo_qr_path: str, output_path: str):
+    """Generate ID card with extracted data and cropped images."""
     try:
         template = Image.open(TEMPLATE_PATH).convert("RGBA")
         draw = ImageDraw.Draw(template)
         
-        # Try to load font, fallback to default
+        # Load font
         try:
             font_large = ImageFont.truetype(FONT_PATH, 42)
             font_medium = ImageFont.truetype(FONT_PATH, 36)
             font_small = ImageFont.truetype(FONT_PATH, 32)
         except:
+            # Fallback fonts
             font_large = ImageFont.load_default()
             font_medium = ImageFont.load_default()
             font_small = ImageFont.load_default()
         
-        # FRONT SIDE
-        fields_front = [
-            ("name", 210, 1120, font_large),
-            ("dob", 210, 1235, font_medium),
-            ("sex", 210, 1325, font_medium),
-            ("expiry", 210, 1410, font_medium),
-            ("fan", 210, 1515, font_large),
-            ("sin", 390, 1555, font_small),
-        ]
+        print("\n🖌️ Placing text on template...")
         
-        for field, x, y, font in fields_front:
-            value = data.get(field, "")
-            if value:
-                draw.text((x, y), value, fill="black", font=font)
-                print(f"   Placed {field} at ({x},{y})")
+        # ======================
+        # FRONT SIDE TEXT
+        # ======================
         
-        # Date of Issue (vertical)
+        # 1️⃣ Full Name (x: 210, y: 1120)
+        name = data.get("name", "")
+        if name:
+            # Take only first part if too long
+            if len(name) > 40:
+                name = name[:40] + "..."
+            draw.text((210, 1120), name, fill="black", font=font_large)
+            print(f"   Name at (210, 1120): {name[:20]}...")
+        
+        # 2️⃣ Date of Birth (x: 210, y: 1235)
+        dob = data.get("dob", "")
+        if dob:
+            draw.text((210, 1235), dob, fill="black", font=font_medium)
+            print(f"   DOB at (210, 1235): {dob}")
+        
+        # 3️⃣ Sex (x: 210, y: 1325)
+        sex = data.get("sex", "")
+        if sex:
+            draw.text((210, 1325), sex, fill="black", font=font_medium)
+            print(f"   Sex at (210, 1325): {sex}")
+        
+        # 4️⃣ Date of Expiry (x: 210, y: 1410)
+        expiry = data.get("expiry", "")
+        if expiry:
+            draw.text((210, 1410), expiry, fill="black", font=font_medium)
+            print(f"   Expiry at (210, 1410): {expiry}")
+        
+        # 5️⃣ FAN (x: 210, y: 1515)
+        fan = data.get("fan", "")
+        if fan:
+            # Format with spaces every 4 digits
+            formatted = ' '.join([fan[i:i+4] for i in range(0, len(fan), 4)])
+            draw.text((210, 1515), formatted, fill="black", font=font_large)
+            print(f"   FAN at (210, 1515): {formatted[:20]}...")
+        
+        # 6️⃣ SN (x: 390, y: 1555)
+        sin = data.get("sin", "")
+        if sin:
+            draw.text((390, 1555), sin, fill="black", font=font_small)
+            print(f"   SN at (390, 1555): {sin}")
+        
+        # 7️⃣ Date of Issue - vertical (x: 1120, y: 360)
         issue_date = data.get("issue_date", "")
         if issue_date:
+            # Create vertical text
             vertical_img = Image.new("RGBA", (780, 80), (255, 255, 255, 0))
             vertical_draw = ImageDraw.Draw(vertical_img)
             vertical_draw.text((0, 0), issue_date, fill="black", font=font_small)
             rotated = vertical_img.rotate(90, expand=True)
             template.paste(rotated, (1120, 360), rotated)
-            print(f"   Placed issue_date vertically")
+            print(f"   Issue date (vertical) at (1120, 360)")
         
-        # BACK SIDE
-        fields_back = [
-            ("phone", 120, 1220, font_medium),
-            ("nationality", 120, 1320, font_medium),
-            ("fin", 760, 1220, font_large),
-        ]
+        # ======================
+        # BACK SIDE TEXT
+        # ======================
         
-        for field, x, y, font in fields_back:
-            value = data.get(field, "")
-            if value:
-                draw.text((x, y), value, fill="black", font=font)
-                print(f"   Placed {field} at ({x},{y})")
+        # 8️⃣ Phone Number (x: 120, y: 1220)
+        phone = data.get("phone", "")
+        if phone:
+            draw.text((120, 1220), phone, fill="black", font=font_medium)
+            print(f"   Phone at (120, 1220): {phone}")
         
-        # Address (multi-line)
+        # 9️⃣ Nationality (x: 120, y: 1320)
+        nationality = data.get("nationality", "")
+        if nationality:
+            draw.text((120, 1320), nationality, fill="black", font=font_medium)
+            print(f"   Nationality at (120, 1320): {nationality}")
+        
+        # 🔟 Address (x: 120, y: 1425) - single line for now
         address = data.get("address", "")
         if address:
-            # Simple single line for now
-            draw.text((120, 1425), address[:40], fill="black", font=font_small)
-            print(f"   Placed address: {address[:20]}...")
+            # Truncate if too long
+            if len(address) > 50:
+                address = address[:50] + "..."
+            draw.text((120, 1425), address, fill="black", font=font_small)
+            print(f"   Address at (120, 1425): {address[:30]}...")
         
-        # Add photos
+        # 1️⃣1️⃣ FIN (x: 760, y: 1220)
+        fin = data.get("fin", "")
+        if fin:
+            draw.text((760, 1220), fin, fill="black", font=font_large)
+            print(f"   FIN at (760, 1220): {fin}")
+        
+        # ======================
+        # CROP AND ADD PHOTOS
+        # ======================
+        
+        print("\n📸 Cropping and placing images...")
+        
         try:
-            # Main photo
-            if os.path.exists(photo_path):
-                photo = Image.open(photo_path).convert("RGBA")
-                # Try to crop to face area (adjust based on your screenshots)
-                # For now, resize and place
-                photo = photo.resize((300, 380))
-                template.paste(photo, (120, 140), photo)
-                print("   Added main photo")
+            # Open the 3rd screenshot (photo + QR)
+            photo_qr_img = Image.open(photo_qr_path).convert("RGBA")
+            print(f"   Source image size: {photo_qr_img.size}")
             
-            # QR code
-            if os.path.exists(qr_path):
-                qr_img = Image.open(qr_path).convert("RGBA")
-                qr_img = qr_img.resize((520, 520))
-                template.paste(qr_img, (1470, 40), qr_img)
-                print("   Added QR code")
-        except Exception as e:
-            print(f"⚠️ Image placement error: {e}")
+            # 1. CROP PHOTO (from your coordinates)
+            # Photo bounding box: (160, 70, 560, 520)
+            photo_box = (160, 70, 560, 520)
+            print(f"   Photo crop box: {photo_box}")
+            
+            try:
+                photo_crop = photo_qr_img.crop(photo_box)
+                # Resize to template size (300x380)
+                photo_crop = photo_crop.resize((300, 380))
+                # Place on template at (120, 140)
+                template.paste(photo_crop, (120, 140), photo_crop)
+                print("   ✅ Photo cropped and placed")
+            except Exception as photo_err:
+                print(f"   ❌ Photo cropping failed: {photo_err}")
+                # Fallback: use whole image resized
+                fallback = photo_qr_img.resize((300, 380))
+                template.paste(fallback, (120, 140), fallback)
+                print("   ⚠️ Used fallback photo")
+            
+            # 2. CROP QR CODE (from your coordinates)
+            # QR bounding box: (80, 650, 640, 1250)
+            qr_box = (80, 650, 640, 1250)
+            print(f"   QR crop box: {qr_box}")
+            
+            try:
+                qr_crop = photo_qr_img.crop(qr_box)
+                # Resize to template size (520x520)
+                qr_crop = qr_crop.resize((520, 520))
+                # Place on template at (1470, 40)
+                template.paste(qr_crop, (1470, 40), qr_crop)
+                print("   ✅ QR code cropped and placed")
+            except Exception as qr_err:
+                print(f"   ❌ QR cropping failed: {qr_err}")
+                # Try to find QR in image
+                qr_width = 640 - 80  # 560
+                qr_height = 1250 - 650  # 600
+                qr_ratio = qr_width / qr_height
+                
+                # Use a portion of the image
+                qr_portion = photo_qr_img.crop((0, photo_qr_img.height//2, 
+                                                photo_qr_img.width, photo_qr_img.height))
+                qr_portion = qr_portion.resize((520, 520))
+                template.paste(qr_portion, (1470, 40), qr_portion)
+                print("   ⚠️ Used fallback QR")
+                
+        except Exception as img_error:
+            print(f"⚠️ Image processing error: {img_error}")
         
+        # Save the final image
         template.save(output_path)
-        print(f"✅ Generated: {output_path}")
+        print(f"\n✅ Generated ID saved to: {output_path}")
+        print(f"   File size: {os.path.getsize(output_path)} bytes")
+        
         return True
         
     except Exception as e:
