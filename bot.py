@@ -269,7 +269,11 @@ def ocr_image(path: str) -> str:
 # ================= PARSING =================
 
 def parse_fayda(front_text: str, back_text: str) -> dict:
-    """Parse Ethiopian Fayda ID from OCR text."""
+    """Parse Ethiopian Fayda ID from OCR text (specific to your format)."""
+    print("\n" + "="*60)
+    print("🔍 PARSING OCR TEXT")
+    print("="*60)
+    
     data = {
         "name": "", "dob": "", "sex": "", "expiry": "",
         "fan": "", "fin": "", "sin": "", 
@@ -277,127 +281,230 @@ def parse_fayda(front_text: str, back_text: str) -> dict:
         "issue_date": "",
     }
     
-    # Combine and split into lines
+    # Combine text
     all_text = front_text + "\n" + back_text
     lines = [line.strip() for line in all_text.split('\n') if line.strip()]
     
-    print(f"\n📄 Total lines from OCR: {len(lines)}")
+    print(f"📄 Total lines: {len(lines)}")
     for i, line in enumerate(lines):
-        print(f"  {i:2d}: {line}")
+        print(f"{i:2d}: {line}")
     
-    # SIMPLE PATTERN MATCHING - Looks for keywords
+    # ============================================
+    # 1. NAME - Look for "ሙሉ ስም | Full Name" pattern
+    # ============================================
     for i, line in enumerate(lines):
-        line_lower = line.lower()
-        
-        # 1. NAME - Look for name-related keywords
-        if not data["name"]:
-            name_keywords = ["ስም", "name", "መት ስሞ"]
-            if any(kw in line for kw in name_keywords):
-                # Check next line for name
-                if i + 1 < len(lines):
-                    next_line = lines[i + 1]
-                    # If next line looks like a name (not another field label)
-                    if not any(kw in next_line.lower() for kw in ["date", "ቀን", "sex", "phone", "fcn", "fan"]):
-                        data["name"] = next_line.strip()
-                        print(f"✅ Found name: {data['name']}")
-        
-        # 2. DATE OF BIRTH
-        if not data["dob"]:
-            dob_keywords = ["የትውልድ", "birth", "dob", "ትውልድ"]
-            if any(kw in line_lower for kw in dob_keywords):
-                # Look for date pattern DD/MM/YYYY or MM/DD/YYYY
-                date_patterns = [
-                    r'\d{1,2}/\d{1,2}/\d{4}',
-                    r'\d{4}/\d{1,2}/\d{1,2}',
-                    r'\d{1,2}-\d{1,2}-\d{4}',
-                ]
-                for pattern in date_patterns:
-                    match = re.search(pattern, line)
-                    if match:
-                        data["dob"] = match.group()
-                        print(f"✅ Found DOB: {data['dob']}")
-                        break
-        
-        # 3. FCN/FAN NUMBER (usually 16 digits)
-        if not data["fan"]:
-            if "fcn" in line_lower or "fan" in line_lower:
-                # Look for 16-digit number (with or without spaces)
-                fan_match = re.search(r'(\d{4}\s?\d{4}\s?\d{4}\s?\d{4})', line)
-                if fan_match:
-                    data["fan"] = fan_match.group(1).replace(" ", "")
-                    print(f"✅ Found FCN: {data['fan']}")
-            else:
-                # Also look for 16-digit pattern anywhere
-                fan_match = re.search(r'(\d{16})', line.replace(" ", ""))
-                if fan_match:
-                    data["fan"] = fan_match.group(1)
-                    print(f"✅ Found FCN (pattern): {data['fan']}")
-        
-        # 4. PHONE NUMBER (Ethiopian numbers usually start with 09 or +251)
-        if not data["phone"]:
-            phone_keywords = ["ስልክ", "phone", "tel", "mobile"]
-            if any(kw in line_lower for kw in phone_keywords):
-                # Look for phone patterns
-                phone_patterns = [
-                    r'09\d{8}',  # Ethiopian mobile
-                    r'\+251\d{9}',  # International format
-                    r'\d{10}',  # Any 10 digits
-                ]
-                for pattern in phone_patterns:
-                    match = re.search(pattern, line.replace(" ", ""))
-                    if match:
-                        data["phone"] = match.group()
-                        print(f"✅ Found phone: {data['phone']}")
-                        break
-        
-        # 5. SEX/GENDER
-        if not data["sex"]:
-            sex_keywords = ["ፆታ", "sex", "gender"]
-            if any(kw in line_lower for kw in sex_keywords):
-                # Look for male/female in this or next line
-                if "male" in line_lower or "ወንድ" in line:
-                    data["sex"] = "ወንድ | Male"
-                    print(f"✅ Found sex: Male")
-                elif "female" in line_lower or "ሴት" in line:
-                    data["sex"] = "ሴት | Female"
-                    print(f"✅ Found sex: Female")
-                elif i + 1 < len(lines):
-                    next_line = lines[i + 1].lower()
-                    if "male" in next_line:
-                        data["sex"] = "ወንድ | Male"
-                    elif "female" in next_line:
-                        data["sex"] = "ሴት | Female"
-        
-        # 6. NATIONALITY
-        if not data["nationality"]:
-            nat_keywords = ["ዜግነት", "nationality", "citizen"]
-            if any(kw in line_lower for kw in nat_keywords):
-                if "ethiopia" in line_lower or "ኢትዮጵያ" in line:
-                    data["nationality"] = "ኢትዮጵያዊ | Ethiopian"
-                    print(f"✅ Found nationality: Ethiopian")
-    
-    # 7. ADDRESS - Look for address-related lines (usually longer text)
-    if not data["address"]:
-        # Ethiopian region/city names
-        ethiopian_places = ["addis", "አዲስ", "ህዋ", "ባህር", "ድሬ", "ጎንደር", "ሀረር", "ጅማ", "አማራ"]
-        for line in lines:
-            line_lower = line.lower()
-            # Skip if line contains other field keywords
-            skip_keywords = ["name", "ስም", "date", "ቀን", "fcn", "phone", "ስልክ"]
-            if any(kw in line_lower for kw in skip_keywords):
-                continue
-            
-            # Check if line looks like an address (has place names or is relatively long)
-            if (any(place in line_lower for place in ethiopian_places) or 
-                (len(line.split()) >= 3 and len(line) > 10)):
-                data["address"] = line
-                print(f"📌 Possible address: {line[:50]}...")
+        if "ሙሉ ስም | Full Name" in line or "Full Name" in line:
+            # Your format shows name on next line
+            if i + 1 < len(lines):
+                name_line = lines[i + 1]
+                print(f"📍 Found name line: '{name_line}'")
+                
+                # Your format: "ሳሙኤል ቀነኒሳ ሰልባና 5 Samuel Kenenisa Selbana g"
+                # Extract Amharic and English parts
+                parts = name_line.split()
+                am_name_parts = []
+                en_name_parts = []
+                in_english = False
+                
+                for part in parts:
+                    # Check if part contains Amharic characters
+                    has_amharic = any('\u1200' <= c <= '\u137F' for c in part)
+                    has_latin = any('A' <= c <= 'Z' or 'a' <= c <= 'z' for c in part)
+                    
+                    if has_amharic and not in_english:
+                        am_name_parts.append(part)
+                    elif has_latin:
+                        in_english = True
+                        en_name_parts.append(part)
+                
+                if am_name_parts:
+                    data["name"] = " ".join(am_name_parts) + " | " + " ".join(en_name_parts)
+                    print(f"✅ Name: {data['name']}")
                 break
     
-    print(f"\n📋 FINAL PARSED DATA:")
+    # ============================================
+    # 2. DATE OF BIRTH - "የትውልድ ቀን | Date of Birth"
+    # ============================================
+    for i, line in enumerate(lines):
+        if "የትውልድ ቀን | Date of Birth" in line or "Date of Birth" in line:
+            if i + 1 < len(lines):
+                dob_line = lines[i + 1]
+                print(f"📍 Found DOB line: '{dob_line}'")
+                
+                # Your format: "07/10/1992 | 2000/Jun/14"
+                # Extract the Ethiopian date (first part)
+                if "|" in dob_line:
+                    eth_date = dob_line.split("|")[0].strip()
+                    data["dob"] = eth_date
+                    print(f"✅ DOB: {data['dob']}")
+                else:
+                    # Try to find date pattern
+                    date_match = re.search(r'\d{2}/\d{2}/\d{4}', dob_line)
+                    if date_match:
+                        data["dob"] = date_match.group()
+                        print(f"✅ DOB: {data['dob']}")
+                break
+    
+    # ============================================
+    # 3. SEX - "Sex" then "ወንድ | Male"
+    # ============================================
+    for i, line in enumerate(lines):
+        if "Sex" in line or "ፆታ" in line:
+            # Your format shows sex on same line or next
+            if "ወንድ | Male" in line or "Male" in line:
+                data["sex"] = "ወንድ | Male"
+                print(f"✅ Sex: {data['sex']}")
+                break
+            elif i + 1 < len(lines):
+                next_line = lines[i + 1]
+                if "ወንድ | Male" in next_line or "Male" in next_line:
+                    data["sex"] = "ወንድ | Male"
+                    print(f"✅ Sex: {data['sex']}")
+                    break
+    
+    # ============================================
+    # 4. EXPIRY DATE - "የሚያበቃበት ቀን | Date of Expiry"
+    # ============================================
+    for i, line in enumerate(lines):
+        if "የሚያበቃበት ቀን | Date of Expiry" in line or "Date of Expiry" in line:
+            if i + 1 < len(lines):
+                expiry_line = lines[i + 1]
+                print(f"📍 Found expiry line: '{expiry_line}'")
+                
+                # Extract date (first date pattern found)
+                date_match = re.search(r'\d{4}/\d{2}/\d{2}', expiry_line)
+                if date_match:
+                    data["expiry"] = date_match.group()
+                    print(f"✅ Expiry: {data['expiry']}")
+                break
+    
+    # ============================================
+    # 5. FAN/FCN - Look for card number
+    # ============================================
+    for i, line in enumerate(lines):
+        # Look for "ካርድ" followed by numbers (from your OCR: "ካርድ 503592")
+        if "ካርድ" in line:
+            # Extract all numbers from this line
+            numbers = re.findall(r'\d+', line)
+            if numbers:
+                # Take the longest number (likely the FCN)
+                longest_num = max(numbers, key=len)
+                if len(longest_num) >= 12:  # FCN is usually 16 digits
+                    data["fan"] = longest_num
+                    print(f"✅ FCN: {data['fan']}")
+                    break
+    
+    # Also search for 16-digit pattern anywhere
+    if not data["fan"]:
+        for line in lines:
+            # Look for 16 consecutive digits
+            fan_match = re.search(r'(\d{16})', line.replace(" ", ""))
+            if fan_match:
+                data["fan"] = fan_match.group(1)
+                print(f"✅ FCN (pattern): {data['fan']}")
+                break
+    
+    # ============================================
+    # 6. PHONE NUMBER - "ስልክ | Phone Number"
+    # ============================================
+    for i, line in enumerate(lines):
+        if "ስልክ | Phone Number" in line or "Phone Number" in line:
+            # Your OCR shows: "ስልክ | Phone Number on 60103 wi |FIN"
+            # Extract phone number from this or next line
+            phone_match = re.search(r'(\d{10})', line)
+            if phone_match:
+                data["phone"] = phone_match.group(1)
+                print(f"✅ Phone: {data['phone']}")
+                break
+            
+            # Check next line
+            if i + 1 < len(lines):
+                next_line = lines[i + 1]
+                phone_match = re.search(r'(\d{10})', next_line)
+                if phone_match:
+                    data["phone"] = phone_match.group(1)
+                    print(f"✅ Phone (next line): {data['phone']}")
+                    break
+    
+    # ============================================
+    # 7. FIN - Look for "FIN" with numbers
+    # ============================================
+    for line in lines:
+        if "FIN" in line:
+            # Extract numbers after FIN
+            fin_match = re.search(r'FIN\s*(\d{4}\s?\d{4}\s?\d{4}\s?\d{4}|\d{13,16})', line)
+            if fin_match:
+                fin_num = fin_match.group(1).replace(" ", "")
+                if len(fin_num) >= 12:
+                    data["fin"] = fin_num
+                    print(f"✅ FIN: {data['fin']}")
+                    break
+    
+    # ============================================
+    # 8. NATIONALITY - "ዜግነት | Nationality"
+    # ============================================
+    for i, line in enumerate(lines):
+        if "ዜግነት | Nationality" in line or "Nationality" in line:
+            if i + 1 < len(lines):
+                nat_line = lines[i + 1]
+                # Check if it contains "ኢትዮጵያ" or "Ethiopian"
+                if "ኢትዮጵያ" in nat_line or "Ethiopian" in nat_line:
+                    data["nationality"] = "ኢትዮጵያ | Ethiopian"
+                    print(f"✅ Nationality: {data['nationality']}")
+                break
+    
+    # ============================================
+    # 9. ADDRESS - "አድራሻ | Address"
+    # ============================================
+    address_lines = []
+    for i, line in enumerate(lines):
+        if "አድራሻ | Address" in line or "Address" in line:
+            # Collect next few lines for address
+            for j in range(i + 1, min(i + 5, len(lines))):
+                addr_line = lines[j]
+                # Stop if we hit another field
+                if any(keyword in addr_line for keyword in ["ስም", "Name", "Date", "Phone", "FIN", "Nationality"]):
+                    break
+                if addr_line.strip() and len(addr_line.strip()) > 2:
+                    address_lines.append(addr_line.strip())
+            
+            if address_lines:
+                data["address"] = " ".join(address_lines)
+                print(f"✅ Address: {data['address'][:50]}...")
+            break
+    
+    # ============================================
+    # 10. SN (SERIAL NUMBER) - Look near barcode
+    # ============================================
+    # SN is often near barcode or as a separate number
+    for line in lines:
+        # Look for patterns like "SN: 123456" or serial numbers
+        sn_match = re.search(r'(?:SN|Serial)[:\s]*(\d+)', line, re.IGNORECASE)
+        if sn_match:
+            data["sin"] = sn_match.group(1)
+            print(f"✅ SN: {data['sin']}")
+            break
+    
+    # ============================================
+    # 11. DATE OF ISSUE - Might be on right side
+    # ============================================
+    # Look for issue date patterns
+    for line in lines:
+        if "የተሰጠበት ቀን" in line or "Date of Issue" in line:
+            date_match = re.search(r'\d{4}/\d{2}/\d{2}', line)
+            if date_match:
+                data["issue_date"] = date_match.group()
+                print(f"✅ Issue Date: {data['issue_date']}")
+                break
+    
+    print("\n" + "="*60)
+    print("📋 PARSING RESULTS")
+    print("="*60)
     for key, value in data.items():
         if value:
-            print(f"   {key:12}: {value}")
+            print(f"✅ {key:12}: {value}")
+        else:
+            print(f"❌ {key:12}: Not found")
     
     return data
 
