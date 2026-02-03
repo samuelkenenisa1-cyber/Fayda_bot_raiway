@@ -507,7 +507,6 @@ def parse_fayda(front_text: str, back_text: str) -> dict:
             print(f"❌ {key:12}: Not found")
     
     return data
-
 # ================= IMAGE GENERATION =================
 
 def generate_id(data: dict, photo_path: str, qr_path: str, output_path: str):
