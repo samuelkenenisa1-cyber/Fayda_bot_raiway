@@ -260,10 +260,10 @@ def ocr_image(path: str) -> str:
 # ================= PARSING =================
 
 def parse_fayda(front_text: str, back_text: str) -> dict:
-    """Parse Ethiopian Fayda ID from OCR text."""
-    print("\n" + "="*60)
-    print("🔍 PARSING OCR TEXT")
-    print("="*60)
+    """Parse Ethiopian Fayda ID from OCR text with detailed logging."""
+    print("\n" + "="*80)
+    print("🔍 PARSING OCR TEXT - DETAILED DEBUG")
+    print("="*80)
     
     data = {
         "name": "", "dob": "", "sex": "", "expiry": "",
@@ -272,81 +272,208 @@ def parse_fayda(front_text: str, back_text: str) -> dict:
         "issue_date": "",
     }
     
-    # Combine text
+    # Save raw OCR for analysis
+    raw_ocr = f"=== FRONT TEXT ===\n{front_text}\n\n=== BACK TEXT ===\n{back_text}"
+    print(raw_ocr)
+    
+    # Combine and clean lines
     all_text = front_text + "\n" + back_text
     lines = [line.strip() for line in all_text.split('\n') if line.strip()]
     
-    print(f"📄 Total lines from OCR: {len(lines)}")
-    for i, line in enumerate(lines[:20]):  # Show first 20 lines
-        print(f"{i:2d}: {line}")
+    print(f"\n📄 TOTAL LINES FROM OCR: {len(lines)}")
+    for i, line in enumerate(lines):
+        print(f"{i:3d}: '{line}'")
     
-    # SIMPLE EXTRACTION - Just look for patterns in the text
+    print("\n" + "-"*80)
+    print("🔎 SEARCHING FOR SPECIFIC PATTERNS")
+    print("-"*80)
     
-    # 1. Look for name patterns
+    # 1. NAME - Look for exact pattern from your OCR
+    print("\n1. Searching for NAME...")
     for i, line in enumerate(lines):
         if "ሙሉ ስም" in line or "Full Name" in line:
-            # Check next line
-            if i + 1 < len(lines):
-                next_line = lines[i + 1]
-                print(f"📍 Possible name on line {i+1}: '{next_line}'")
-                # Clean up OCR noise
-                cleaned = re.sub(r'[^\w\s|]', '', next_line)
-                data["name"] = cleaned.strip()
-                break
-    
-    # 2. Look for date of birth
-    for line in lines:
-        if "የትውልድ" in line or "Date of Birth" in line:
-            # Extract date pattern
-            date_match = re.search(r'(\d{2}/\d{2}/\d{4})', line)
-            if date_match:
-                data["dob"] = date_match.group(1)
+            print(f"   Found name header at line {i}: '{line}'")
+            # Check next 3 lines
+            for j in range(i+1, min(i+4, len(lines))):
+                print(f"   Checking line {j}: '{lines[j]}'")
+                # Look for Amharic characters
+                if any('\u1200' <= c <= '\u137F' for c in lines[j]):
+                    data["name"] = lines[j].strip()
+                    print(f"   ✅ Found name: '{data['name']}'")
+                    break
             break
     
-    # 3. Look for FCN/FAN (16-digit number)
-    for line in lines:
-        # Remove spaces and look for 16 consecutive digits
-        no_spaces = line.replace(" ", "")
-        fan_match = re.search(r'(\d{16})', no_spaces)
+    # 2. DATE OF BIRTH
+    print("\n2. Searching for DATE OF BIRTH...")
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        if "የትውልድ" in line or "date of birth" in line_lower or "dob" in line_lower:
+            print(f"   Found DOB header at line {i}: '{line}'")
+            # Look for date pattern in this line or next
+            search_text = line + " " + (lines[i+1] if i+1 < len(lines) else "")
+            print(f"   Searching in: '{search_text[:50]}...'")
+            
+            # Try different date patterns
+            patterns = [
+                r'\d{2}/\d{2}/\d{4}',  # DD/MM/YYYY
+                r'\d{4}/\d{2}/\d{2}',  # YYYY/MM/DD
+                r'\d{2}-\d{2}-\d{4}',  # DD-MM-YYYY
+            ]
+            
+            for pattern in patterns:
+                matches = re.findall(pattern, search_text)
+                if matches:
+                    data["dob"] = matches[0]
+                    print(f"   ✅ Found DOB with pattern {pattern}: '{data['dob']}'")
+                    break
+            break
+    
+    # 3. FCN/FAN NUMBER
+    print("\n3. Searching for FCN/FAN...")
+    for i, line in enumerate(lines):
+        line_no_spaces = line.replace(" ", "")
+        print(f"   Line {i} (no spaces): '{line_no_spaces[:50]}...'")
+        
+        # Look for 16-digit number
+        fan_match = re.search(r'(\d{16})', line_no_spaces)
         if fan_match:
             data["fan"] = fan_match.group(1)
+            print(f"   ✅ Found FCN: '{data['fan']}'")
             break
+        
+        # Also check for "ካርድ" followed by numbers
+        if "ካርድ" in line:
+            print(f"   Found 'ካርድ' at line {i}")
+            numbers = re.findall(r'\d+', line)
+            if numbers:
+                print(f"   Numbers in line: {numbers}")
+                longest = max(numbers, key=len)
+                if len(longest) >= 12:
+                    data["fan"] = longest
+                    print(f"   ✅ Found FCN from 'ካርድ': '{data['fan']}'")
+                    break
     
-    # 4. Look for phone number
-    for line in lines:
+    # 4. PHONE NUMBER
+    print("\n4. Searching for PHONE...")
+    for i, line in enumerate(lines):
         if "ስልክ" in line or "Phone" in line:
+            print(f"   Found phone header at line {i}: '{line}'")
+            # Look for 10-digit number
             phone_match = re.search(r'(\d{10})', line.replace(" ", ""))
             if phone_match:
                 data["phone"] = phone_match.group(1)
+                print(f"   ✅ Found phone in same line: '{data['phone']}'")
                 break
-    
-    # 5. Look for FIN
-    for line in lines:
-        if "FIN" in line:
-            # Extract numbers after FIN
-            fin_match = re.search(r'FIN\s*([\d\s]+)', line)
-            if fin_match:
-                fin_num = re.sub(r'\s+', '', fin_match.group(1))
-                if len(fin_num) >= 12:
-                    data["fin"] = fin_num
+            
+            # Check next line
+            if i + 1 < len(lines):
+                next_line = lines[i + 1]
+                phone_match = re.search(r'(\d{10})', next_line.replace(" ", ""))
+                if phone_match:
+                    data["phone"] = phone_match.group(1)
+                    print(f"   ✅ Found phone in next line: '{data['phone']}'")
                     break
     
-    # 6. Look for address
+    # 5. SEX/GENDER
+    print("\n5. Searching for SEX...")
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        if "sex" in line_lower or "ፆታ" in line:
+            print(f"   Found sex header at line {i}: '{line}'")
+            # Check for male/female
+            if "male" in line_lower or "ወንድ" in line:
+                data["sex"] = "ወንድ | Male"
+                print(f"   ✅ Found sex in same line: '{data['sex']}'")
+                break
+            elif i + 1 < len(lines):
+                next_line = lines[i + 1].lower()
+                if "male" in next_line or "ወንድ" in lines[i + 1]:
+                    data["sex"] = "ወንድ | Male"
+                    print(f"   ✅ Found sex in next line: '{data['sex']}'")
+                    break
+    
+    # 6. FIN
+    print("\n6. Searching for FIN...")
+    for i, line in enumerate(lines):
+        if "FIN" in line:
+            print(f"   Found FIN at line {i}: '{line}'")
+            # Extract all numbers from the line
+            numbers = re.findall(r'\d+', line.replace(" ", ""))
+            if numbers:
+                print(f"   Numbers in line: {numbers}")
+                # Take the longest number (likely FIN)
+                longest = max(numbers, key=len)
+                if len(longest) >= 12:
+                    data["fin"] = longest
+                    print(f"   ✅ Found FIN: '{data['fin']}'")
+                    break
+    
+    # 7. NATIONALITY
+    print("\n7. Searching for NATIONALITY...")
+    for i, line in enumerate(lines):
+        if "ዜግነት" in line or "Nationality" in line:
+            print(f"   Found nationality header at line {i}: '{line}'")
+            # Check next line
+            if i + 1 < len(lines):
+                next_line = lines[i + 1]
+                if "ኢትዮጵያ" in next_line or "Ethiopian" in next_line:
+                    data["nationality"] = "ኢትዮጵያ | Ethiopian"
+                    print(f"   ✅ Found nationality: '{data['nationality']}'")
+                    break
+    
+    # 8. ADDRESS
+    print("\n8. Searching for ADDRESS...")
     for i, line in enumerate(lines):
         if "አድራሻ" in line or "Address" in line:
-            # Collect next few lines
-            address_parts = []
-            for j in range(i+1, min(i+4, len(lines))):
+            print(f"   Found address header at line {i}: '{line}'")
+            # Collect next 3-5 lines
+            address_lines = []
+            for j in range(i + 1, min(i + 6, len(lines))):
                 addr_line = lines[j]
-                if addr_line and len(addr_line) > 3:
-                    address_parts.append(addr_line)
-            if address_parts:
-                data["address"] = " ".join(address_parts)
-                break
+                # Skip if it looks like another field
+                if any(keyword in addr_line for keyword in ["ስም", "Name", "Phone", "FIN", "Nationality"]):
+                    break
+                if addr_line.strip():
+                    address_lines.append(addr_line.strip())
+                    print(f"   Address line {j}: '{addr_line}'")
+            
+            if address_lines:
+                data["address"] = " | ".join(address_lines)
+                print(f"   ✅ Found address: '{data['address'][:50]}...'")
+            break
     
-    print("\n📋 PARSED DATA:")
+    # 9. EXPIRY DATE
+    print("\n9. Searching for EXPIRY DATE...")
+    for i, line in enumerate(lines):
+        if "የሚያበቃበት" in line or "Expiry" in line.lower():
+            print(f"   Found expiry header at line {i}: '{line}'")
+            # Look for date pattern
+            date_match = re.search(r'\d{4}/\d{2}/\d{2}', line)
+            if date_match:
+                data["expiry"] = date_match.group()
+                print(f"   ✅ Found expiry: '{data['expiry']}'")
+                break
+            elif i + 1 < len(lines):
+                next_line = lines[i + 1]
+                date_match = re.search(r'\d{4}/\d{2}/\d{2}', next_line)
+                if date_match:
+                    data["expiry"] = date_match.group()
+                    print(f"   ✅ Found expiry in next line: '{data['expiry']}'")
+                    break
+    
+    print("\n" + "="*80)
+    print("📋 FINAL PARSED DATA SUMMARY")
+    print("="*80)
+    
+    found_count = 0
     for key, value in data.items():
-        print(f"   {key:12}: '{value}'")
+        if value:
+            found_count += 1
+            print(f"✅ {key:12}: '{value}'")
+        else:
+            print(f"❌ {key:12}: NOT FOUND")
+    
+    print(f"\n📊 Total fields found: {found_count}/11")
     
     return data
 
