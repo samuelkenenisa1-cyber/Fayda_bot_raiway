@@ -121,9 +121,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         traceback.print_exc()
         await update.message.reply_text("❌ Error saving image")
 
-# ==================================================
-# NEXT FUNCTION - process_user_images should be HERE
-# ==================================================
+
 async def process_user_images(update: Update, user_id: int):
     """Process all 3 images for a user."""
     try:
@@ -139,8 +137,6 @@ async def process_user_images(update: Update, user_id: int):
             return
         
         await update.message.reply_text("⏳ Processing images...")
-        
-        # ... rest of the process_user_images function continues ...
         
         # Test OCR on first image only (for now)
         print("🔍 Testing OCR on first image...")
@@ -190,7 +186,9 @@ async def process_user_images(update: Update, user_id: int):
     finally:
         # Cleanup
         cleanup_user_session(user_id)
-      def cleanup_user_session(user_id: int):
+
+
+def cleanup_user_session(user_id: int):
     """Clean up user session and files."""
     print(f"🧹 Cleaning up user {user_id}")
     
