@@ -480,99 +480,134 @@ def parse_fayda(front_text: str, back_text: str) -> dict:
 # ================= IMAGE GENERATION =================
 
 def generate_id(data: dict, photo_qr_path: str, output_path: str):
-    """Generate ID card with extracted data."""
+    """Generate ID card with data and cropped images."""
     try:
-        print(f"\n🎨 GENERATING ID CARD")
-        print(f"   Template: {TEMPLATE_PATH}")
-        print(f"   Photo/QR source: {photo_qr_path}")
-        print(f"   Output: {output_path}")
+        print(f"\n🎨 GENERATING ID CARD - DEBUG MODE")
+        print(f"Data received: {len(data)} fields")
+        
+        # SHOW ALL DATA
+        print("📋 ALL DATA RECEIVED:")
+        for key, value in data.items():
+            print(f"  {key:12}: '{value}'")
         
         # Open template
         template = Image.open(TEMPLATE_PATH).convert("RGBA")
-        print(f"   Template size: {template.size}")
+        print(f"📐 Template size: {template.size}")
         
         draw = ImageDraw.Draw(template)
         
-        # Try to load font
-        font_size = 40
+        # Try different font approaches
+        font_success = False
         try:
             if os.path.exists(FONT_PATH):
-                font = ImageFont.truetype(FONT_PATH, font_size)
-                print(f"   Using font: {FONT_PATH} size {font_size}")
+                font_large = ImageFont.truetype(FONT_PATH, 42)
+                font_medium = ImageFont.truetype(FONT_PATH, 36)
+                font_small = ImageFont.truetype(FONT_PATH, 32)
+                print(f"✅ Font loaded: {FONT_PATH}")
+                font_success = True
             else:
-                font = ImageFont.load_default()
-                print(f"   Using default font (custom font not found)")
+                print(f"❌ Font file not found: {FONT_PATH}")
+                raise FileNotFoundError
         except Exception as font_error:
-            print(f"   Font error: {font_error}")
-            font = ImageFont.load_default()
+            print(f"⚠️ Font error: {font_error}")
+            print("🔄 Using default font")
+            font_large = ImageFont.load_default()
+            font_medium = ImageFont.load_default()
+            font_small = ImageFont.load_default()
         
-        print(f"\n📝 PLACING TEXT:")
+        # Test font by drawing a test text
+        test_position = (50, 50)
+        draw.text(test_position, "TEST FONT", fill="red", font=font_large)
+        print(f"🧪 Test text drawn at {test_position} in RED")
         
-        # Define text positions with your coordinates
-        text_positions = {
-            "name": (210, 1120, "FRONT - Full Name"),
-            "dob": (210, 1235, "FRONT - Date of Birth"),
-            "sex": (210, 1325, "FRONT - Sex"),
-            "expiry": (210, 1410, "FRONT - Expiry Date"),
-            "fan": (210, 1515, "FRONT - FAN"),
-            "sin": (390, 1555, "FRONT - SN"),
-            "phone": (120, 1220, "BACK - Phone"),
-            "nationality": (120, 1320, "BACK - Nationality"),
-            "address": (120, 1425, "BACK - Address"),
-            "fin": (760, 1220, "BACK - FIN"),
-        }
+        print("\n📝 PLACING TEXT AT COORDINATES:")
         
-        # Place each field
-        for field, (x, y, description) in text_positions.items():
+        # FRONT SIDE with your exact coordinates
+        front_fields = [
+            ("name", 210, 1120, font_large, "Full Name"),
+            ("dob", 210, 1235, font_medium, "Date of Birth"),
+            ("sex", 210, 1325, font_medium, "Sex"),
+            ("expiry", 210, 1410, font_medium, "Expiry Date"),
+            ("fan", 210, 1515, font_large, "FAN"),
+            ("sin", 390, 1555, font_small, "SN"),
+        ]
+        
+        for field, x, y, font, label in front_fields:
             value = data.get(field, "")
             if value:
-                print(f"   ✅ {description} at ({x},{y}): '{value[:30]}...'")
+                print(f"  ✅ {label} at ({x},{y}): '{value[:20]}...'")
                 draw.text((x, y), str(value), fill="black", font=font)
+                # Draw a green dot at the position for debugging
+                draw.ellipse([(x-5, y-5), (x+5, y+5)], fill="green")
             else:
-                print(f"   ❌ {description} at ({x},{y}): NO DATA")
+                print(f"  ❌ {label} at ({x},{y}): NO DATA")
         
         # Date of Issue (vertical)
         issue_date = data.get("issue_date", "")
         if issue_date:
-            print(f"   ✅ Date of Issue (vertical) at (1120,360): '{issue_date}'")
-            # Create vertical text
-            vertical_img = Image.new("RGBA", (780, 80), (255, 255, 255, 0))
-            vertical_draw = ImageDraw.Draw(vertical_img)
-            vertical_draw.text((0, 0), issue_date, fill="black", font=font)
-            rotated = vertical_img.rotate(90, expand=True)
-            template.paste(rotated, (1120, 360), rotated)
+            print(f"  ✅ Issue Date (vertical) at (1120,360): '{issue_date}'")
+            # Draw a blue box where vertical text should go
+            draw.rectangle([(1120, 360), (1120+80, 360+780)], outline="blue", width=2)
         
-        print(f"\n📸 PROCESSING IMAGES:")
+        # BACK SIDE
+        back_fields = [
+            ("phone", 120, 1220, font_medium, "Phone"),
+            ("nationality", 120, 1320, font_medium, "Nationality"),
+            ("address", 120, 1425, font_small, "Address"),
+            ("fin", 760, 1220, font_large, "FIN"),
+        ]
         
-        # Crop and place images from 3rd screenshot
+        for field, x, y, font, label in back_fields:
+            value = data.get(field, "")
+            if value:
+                print(f"  ✅ {label} at ({x},{y}): '{value[:20]}...'")
+                draw.text((x, y), str(value), fill="black", font=font)
+                # Draw a red dot at the position
+                draw.ellipse([(x-5, y-5), (x+5, y+5)], fill="red")
+            else:
+                print(f"  ❌ {label} at ({x},{y}): NO DATA")
+        
+        # Draw coordinate grid for debugging
+        print("\n📐 Drawing debug grid...")
+        for x in [210, 120, 760, 390, 1120]:
+            for y in [1120, 1235, 1325, 1410, 1515, 1555, 1220, 1320, 1425, 360]:
+                draw.ellipse([(x-2, y-2), (x+2, y+2)], fill="blue")
+        
+        # Add images (keep your existing code)
+        print("\n📸 Processing images...")
         try:
-            photo_qr_img = Image.open(photo_qr_path).convert("RGBA")
-            print(f"   Source image size: {photo_qr_img.size}")
+            photo_img = Image.open(photo_qr_path).convert("RGBA")
+            print(f"  Source image: {photo_img.size}")
             
-            # Crop photo (160, 70, 560, 520)
-            try:
-                photo_crop = photo_qr_img.crop((160, 70, 560, 520))
-                photo_crop = photo_crop.resize((300, 380))
-                template.paste(photo_crop, (120, 140), photo_crop)
-                print(f"   ✅ Photo cropped: (160,70,560,520) → (120,140,420,520)")
-            except Exception as photo_err:
-                print(f"   ❌ Photo crop failed: {photo_err}")
+            # Photo
+            photo_crop = photo_img.crop((160, 70, 560, 520))
+            photo_crop = photo_crop.resize((300, 380))
+            template.paste(photo_crop, (120, 140), photo_crop)
+            print(f"  ✅ Photo: (160,70,560,520) → (120,140,420,520)")
             
-            # Crop QR (80, 650, 640, 1250)
-            try:
-                qr_crop = photo_qr_img.crop((80, 650, 640, 1250))
-                qr_crop = qr_crop.resize((520, 520))
-                template.paste(qr_crop, (1470, 40), qr_crop)
-                print(f"   ✅ QR cropped: (80,650,640,1250) → (1470,40,1990,560)")
-            except Exception as qr_err:
-                print(f"   ❌ QR crop failed: {qr_err}")
+            # Draw photo area box
+            draw.rectangle([(120, 140), (120+300, 140+380)], outline="purple", width=3)
+            
+            # QR
+            qr_crop = photo_img.crop((80, 650, 640, 1250))
+            qr_crop = qr_crop.resize((520, 520))
+            template.paste(qr_crop, (1470, 40), qr_crop)
+            print(f"  ✅ QR: (80,650,640,1250) → (1470,40,1990,560)")
+            
+            # Draw QR area box
+            draw.rectangle([(1470, 40), (1470+520, 40+520)], outline="orange", width=3)
                 
         except Exception as img_err:
-            print(f"   ❌ Image processing failed: {img_err}")
+            print(f"  ⚠️ Image error: {img_err}")
         
-        # Save the image
+        # Save debug version
+        debug_path = output_path.replace(".png", "_debug.png")
+        template.save(debug_path)
+        print(f"\n✅ Debug image saved: {debug_path}")
+        
+        # Also save the normal version
         template.save(output_path)
-        print(f"\n✅ Saved to: {output_path}")
+        print(f"✅ Final image saved: {output_path}")
         
         return True
         
@@ -618,6 +653,31 @@ def create_debug_grid(template_path: str, output_path: str):
 # ================= MAIN =================
 
 def main():
+    """Start the bot."""
+    print("🚀 Starting Fayda ID Bot...")
+    print("=" * 50)
+    
+    # Check files
+    print("🔍 Checking files:")
+    print(f"  Template: {TEMPLATE_PATH} - {'✅' if os.path.exists(TEMPLATE_PATH) else '❌'}")
+    print(f"  Font: {FONT_PATH} - {'✅' if os.path.exists(FONT_PATH) else '❌'}")
+    
+    if os.path.exists(FONT_PATH):
+        # Test if font can be loaded
+        try:
+            test_font = ImageFont.truetype(FONT_PATH, 20)
+            print(f"  Font test: ✅ Can load '{FONT_PATH}'")
+        except Exception as e:
+            print(f"  Font test: ❌ Cannot load: {e}")
+    else:
+        print("  ⚠️ Font file missing - will use default font")
+    
+    print("=" * 50)
+    
+    if not BOT_TOKEN:
+        print("❌ ERROR: BOT_TOKEN not set!")
+        return
+   
     """Start the bot."""
     print("🚀 Starting Fayda ID Bot...")
     
