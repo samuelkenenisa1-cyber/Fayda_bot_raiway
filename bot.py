@@ -70,9 +70,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "data": {},
             "step": 0
         }
-        # Don't ask to /start - just accept the photo
-        # await update.message.reply_text("Please send /start first")
-        # return
     
     print(f"✅ Session found for user {user_id}")
     
@@ -123,7 +120,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         import traceback
         traceback.print_exc()
         await update.message.reply_text("❌ Error saving image")
-       async def process_user_images(update: Update, user_id: int):
+
+# ==================================================
+# NEXT FUNCTION - process_user_images should be HERE
+# ==================================================
+async def process_user_images(update: Update, user_id: int):
     """Process all 3 images for a user."""
     try:
         print(f"\n🔄 PROCESSING images for user {user_id}")
@@ -138,6 +139,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         await update.message.reply_text("⏳ Processing images...")
+        
+        # ... rest of the process_user_images function continues ...
         
         # Test OCR on first image only (for now)
         print("🔍 Testing OCR on first image...")
