@@ -33,227 +33,194 @@ user_sessions = {}
 # ================= BOT HANDLERS =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command."""
+    """Handle /start command - SIMPLIFIED."""
     user_id = update.effective_user.id
-    user_sessions[user_id] = []
+    
+    # Initialize or reset session
+    user_sessions[user_id] = {
+        "images": [],
+        "data": {},
+        "step": 0
+    }
+    
+    print(f"🚀 New session for user {user_id}")
     
     await update.message.reply_text(
         "📄 *Fayda ID Bot*\n\n"
         "Send me 3 screenshots in this order:\n"
-        "1️⃣ Front page of ID (text only)\n"
-        "2️⃣ Back page of ID (text only)\n"
+        "1️⃣ Front page of ID\n"
+        "2️⃣ Back page of ID\n"
         "3️⃣ Photo + QR code page\n\n"
-        "I'll extract information and generate a formatted ID card.",
+        "I'll extract information and generate an ID card.",
         parse_mode='Markdown'
     )
-
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle photo uploads - DEBUG VERSION."""
+    """Handle photo uploads - FIXED SESSION VERSION."""
     user_id = update.effective_user.id
-    print(f"\n" + "="*80)
-    print(f"📸 HANDLE_PHOTO STARTED for user {user_id}")
-    print("="*80)
+    print(f"\n📸 Photo from user {user_id}")
     
+    # DEBUG: Show all current sessions
+    print(f"📋 Current sessions: {list(user_sessions.keys())}")
+    
+    # Initialize session if not exists
     if user_id not in user_sessions:
-        print("❌ No session found, asking user to /start")
-        await update.message.reply_text("Please send /start first")
-        return
+        print(f"❌ No session for user {user_id}, creating new one...")
+        user_sessions[user_id] = {
+            "images": [],
+            "data": {},
+            "step": 0
+        }
+        # Don't ask to /start - just accept the photo
+        # await update.message.reply_text("Please send /start first")
+        # return
+    
+    print(f"✅ Session found for user {user_id}")
     
     # Get photo
     try:
         photo = update.message.photo[-1]
-        print(f"✅ Photo received: size {photo.file_size}")
+        print(f"   Photo size: {photo.file_size} bytes")
     except Exception as e:
         print(f"❌ Failed to get photo: {e}")
+        await update.message.reply_text("❌ Failed to get photo")
         return
     
     file = await photo.get_file()
     
-    # Save image
-    img_index = len(user_sessions[user_id]["images"]) + 1
-    img_path = f"/tmp/user_{user_id}_{img_index}.png"
+    # Create temp directory
+    temp_dir = "/tmp/fayda_bot"
+    os.makedirs(temp_dir, exist_ok=True)
     
-    print(f"💾 Saving image {img_index} to: {img_path}")
+    # Save image
+    img_index = len(user_sessions[user_id]["images"])
+    img_path = os.path.join(temp_dir, f"user_{user_id}_{img_index}.png")
+    
+    print(f"💾 Saving image {img_index + 1} to: {img_path}")
+    
     try:
         await file.download_to_drive(img_path)
-        print(f"✅ Image saved: {os.path.getsize(img_path)} bytes")
+        file_size = os.path.getsize(img_path)
+        print(f"✅ Saved: {file_size} bytes")
         
-        # Test if image is readable
-        test_img = Image.open(img_path)
-        print(f"📐 Image size: {test_img.size}, format: {test_img.format}")
-        test_img.close()
-    except Exception as e:
-        print(f"❌ Failed to save image: {e}")
-        await update.message.reply_text("❌ Failed to save image")
-        return
-    
-    user_sessions[user_id]["images"].append(img_path)
-    
-    await update.message.reply_text(f"✅ Image {img_index}/3 received")
-    
-    if img_index < 3:
-        print(f"⏳ Waiting for more images ({img_index}/3)")
-        return
-    
-    print("\n" + "="*80)
-    print("🎯 ALL 3 IMAGES RECEIVED - STARTING PROCESSING")
-    print("="*80)
-    
-    try:
-        # Step 1: OCR on first image
-        print("\n--- STEP 1: FRONT PAGE OCR ---")
-        await update.message.reply_text("🔍 Extracting text from front page...")
-        front_text = ocr_space_api(user_sessions[user_id]["images"][0])
-        print(f"✅ Front OCR: {len(front_text)} characters")
-        if front_text:
-            print(f"First 100 chars: {front_text[:100]}")
+        user_sessions[user_id]["images"].append(img_path)
         
-        # Step 2: OCR on second image
-        print("\n--- STEP 2: BACK PAGE OCR ---")
-        await update.message.reply_text("🔍 Extracting text from back page...")
-        back_text = ocr_space_api(user_sessions[user_id]["images"][1])
-        print(f"✅ Back OCR: {len(back_text)} characters")
-        if back_text:
-            print(f"First 100 chars: {back_text[:100]}")
+        # Send acknowledgement
+        await update.message.reply_text(f"✅ Image {img_index + 1}/3 received")
         
-        if not front_text.strip() and not back_text.strip():
-            print("❌ OCR extracted NO text from both images")
-            await update.message.reply_text(
-                "❌ OCR failed to extract any text.\n"
-                "Please send clearer screenshots."
-            )
+        # Check if we have all 3 images
+        if len(user_sessions[user_id]["images"]) < 3:
+            print(f"⏳ Waiting for more images ({len(user_sessions[user_id]['images'])}/3)")
             return
         
-        # Step 3: Parse data
-        print("\n--- STEP 3: PARSING DATA ---")
-        await update.message.reply_text("📋 Parsing ID information...")
-        data = parse_fayda(front_text, back_text)
+        print("\n🎯 ALL 3 IMAGES RECEIVED!")
+        print(f"   Images: {user_sessions[user_id]['images']}")
         
-        # Show what was found
-        found_fields = [k for k, v in data.items() if v]
-        print(f"📊 Found {len(found_fields)} fields: {found_fields}")
+        # Process the images
+        await process_user_images(update, user_id)
         
-        if found_fields:
-            summary = f"📊 *Found {len(found_fields)} fields:*\n"
-            for field in found_fields[:5]:
-                value = data.get(field, "")
-                summary += f"• {field}: {value[:30]}{'...' if len(value) > 30 else ''}\n"
-            await update.message.reply_text(summary, parse_mode='Markdown')
-        
-        # Step 4: Generate ID
-        print("\n--- STEP 4: GENERATING ID ---")
-        print(f"📁 Using 3rd image for photo/QR: {user_sessions[user_id]['images'][2]}")
-        print(f"📋 Data to place: {found_fields}")
-        
-        await update.message.reply_text("🎨 Generating ID card...")
-        output_path = f"/tmp/user_{user_id}_final.png"
-        debug_path = f"/tmp/user_{user_id}_debug.png"
-        
-        print(f"📤 Output paths:")
-        print(f"   Final: {output_path}")
-        print(f"   Debug: {debug_path}")
-        
-        # Check if 3rd image exists
-        if not os.path.exists(user_sessions[user_id]["images"][2]):
-            print(f"❌ 3rd image not found at: {user_sessions[user_id]['images'][2]}")
-            await update.message.reply_text("❌ Error: Could not find photo/QR image")
-            return
-        
-        success = generate_id(
-            data, 
-            user_sessions[user_id]["images"][2],  # Third image
-            output_path
-        )
-        
-        print(f"\n--- STEP 5: SENDING RESULTS ---")
-        print(f"✅ Generation success: {success}")
-        
-        if success:
-            # Check if files were created
-            print(f"📁 Checking output files:")
-            print(f"   Final exists: {os.path.exists(output_path)} - {os.path.getsize(output_path) if os.path.exists(output_path) else 0} bytes")
-            print(f"   Debug exists: {os.path.exists(debug_path)} - {os.path.getsize(debug_path) if os.path.exists(debug_path) else 0} bytes")
-            
-            # Send debug version if exists
-            if os.path.exists(debug_path) and os.path.getsize(debug_path) > 0:
-                print("📤 Sending debug image...")
-                try:
-                    with open(debug_path, "rb") as debug_file:
-                        await update.message.reply_photo(
-                            photo=debug_file,
-                            caption="🔍 *DEBUG VERSION*",
-                            parse_mode='Markdown'
-                        )
-                    print("✅ Debug image sent")
-                except Exception as debug_err:
-                    print(f"❌ Failed to send debug image: {debug_err}")
-            else:
-                print("⚠️ No debug image found or empty")
-            
-            # Send final version
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                print("📤 Sending final image...")
-                try:
-                    with open(output_path, "rb") as final_file:
-                        caption = f"✅ *ID Generated!*\nFound {len(found_fields)} fields"
-                        if found_fields:
-                            caption += f": {', '.join(found_fields[:3])}"
-                            if len(found_fields) > 3:
-                                caption += f" and {len(found_fields)-3} more"
-                        
-                        await update.message.reply_photo(
-                            photo=final_file,
-                            caption=caption,
-                            parse_mode='Markdown'
-                        )
-                    print("✅ Final image sent")
-                except Exception as final_err:
-                    print(f"❌ Failed to send final image: {final_err}")
-                    await update.message.reply_text("❌ Error sending image")
-            else:
-                print(f"❌ Final image not found or empty at: {output_path}")
-                await update.message.reply_text("❌ Generated image is empty")
-        else:
-            print("❌ generate_id() returned False")
-            await update.message.reply_text("❌ Failed to generate ID image")
-    
     except Exception as e:
-        print(f"\n" + "!"*80)
-        print(f"❌ UNEXPECTED ERROR in handle_photo:")
-        print(f"Error type: {type(e).__name__}")
-        print(f"Error message: {e}")
+        print(f"❌ Error saving image: {e}")
         import traceback
         traceback.print_exc()
-        print("!"*80)
+        await update.message.reply_text("❌ Error saving image")
+        async def process_user_images(update: Update, user_id: int):
+    """Process all 3 images for a user."""
+    try:
+        print(f"\n🔄 PROCESSING images for user {user_id}")
         
+        if user_id not in user_sessions:
+            await update.message.reply_text("❌ Session expired. Please send /start")
+            return
+        
+        images = user_sessions[user_id]["images"]
+        if len(images) < 3:
+            await update.message.reply_text(f"❌ Need 3 images, got {len(images)}")
+            return
+        
+        await update.message.reply_text("⏳ Processing images...")
+        
+        # Test OCR on first image only (for now)
+        print("🔍 Testing OCR on first image...")
+        front_text = ocr_space_api(images[0])
+        print(f"   OCR result: {len(front_text)} chars")
+        
+        if front_text:
+            await update.message.reply_text(f"✅ OCR extracted {len(front_text)} characters")
+        else:
+            await update.message.reply_text("❌ OCR failed")
+        
+        # Create a simple test image
+        output_path = f"/tmp/fayda_bot/user_{user_id}_output.png"
+        print(f"🎨 Creating test image at: {output_path}")
+        
+        # Create test image
+        test_img = Image.new('RGB', (800, 400), color='white')
+        draw = ImageDraw.Draw(test_img)
+        
+        # Add test text
+        draw.text((10, 10), "Fayda ID Bot - Test Output", fill='black')
+        draw.text((10, 50), f"User: {user_id}", fill='blue')
+        draw.text((10, 90), f"Images received: {len(images)}", fill='green')
+        draw.text((10, 130), f"OCR chars: {len(front_text)}", fill='red')
+        draw.text((10, 170), "✅ Bot is working!", fill='purple')
+        
+        # Save
+        test_img.save(output_path)
+        print(f"✅ Test image created: {os.path.getsize(output_path)} bytes")
+        
+        # Send to user
+        with open(output_path, "rb") as photo_file:
+            await update.message.reply_photo(
+                photo=photo_file,
+                caption="🧪 *Test Output* - Bot is working!\nNext: Add OCR and template",
+                parse_mode='Markdown'
+            )
+        
+        print(f"✅ Processing complete for user {user_id}")
+        
+    except Exception as e:
+        print(f"❌ Processing error: {e}")
+        import traceback
+        traceback.print_exc()
         await update.message.reply_text(f"❌ Processing error: {str(e)[:100]}")
     
     finally:
         # Cleanup
-        print(f"\n🧹 Cleaning up user {user_id} session...")
-        if user_id in user_sessions:
-            # List files to delete
-            for i, img_path in enumerate(user_sessions[user_id]["images"]):
-                if os.path.exists(img_path):
-                    try:
-                        os.remove(img_path)
-                        print(f"   Deleted image {i+1}: {img_path}")
-                    except:
-                        pass
-            
-            # Delete output files
-            for path in [output_path, debug_path]:
-                if 'path' in locals() and os.path.exists(path):
-                    try:
-                        os.remove(path)
-                        print(f"   Deleted: {path}")
-                    except:
-                        pass
-            
-            del user_sessions[user_id]
-            print(f"✅ Session cleaned up")
+        cleanup_user_session(user_id)
+        def cleanup_user_session(user_id: int):
+    """Clean up user session and files."""
+    print(f"🧹 Cleaning up user {user_id}")
+    
+    if user_id in user_sessions:
+        # Delete image files
+        for img_path in user_sessions[user_id].get("images", []):
+            if os.path.exists(img_path):
+                try:
+                    os.remove(img_path)
+                    print(f"   Deleted: {img_path}")
+                except:
+                    pass
+        
+        # Delete output files
+        output_patterns = [
+            f"/tmp/fayda_bot/user_{user_id}_*.png",
+            f"/tmp/user_{user_id}_*.png"
+        ]
+        
+        import glob
+        for pattern in output_patterns:
+            for file_path in glob.glob(pattern):
+                try:
+                    os.remove(file_path)
+                    print(f"   Deleted: {file_path}")
+                except:
+                    pass
+        
+        # Remove session
+        del user_sessions[user_id]
+        print(f"✅ Session cleaned up")
+        
 # ================= OCR =================
-
 def ocr_image(path: str) -> str:
     """Extract text from image."""
     try:
