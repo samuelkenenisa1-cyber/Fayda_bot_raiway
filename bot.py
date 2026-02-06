@@ -48,52 +48,91 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle photo uploads."""
+    """Handle photo uploads - DEBUG VERSION."""
     user_id = update.effective_user.id
+    print(f"\n" + "="*80)
+    print(f"📸 HANDLE_PHOTO STARTED for user {user_id}")
+    print("="*80)
     
     if user_id not in user_sessions:
+        print("❌ No session found, asking user to /start")
         await update.message.reply_text("Please send /start first")
         return
     
     # Get photo
-    photo = update.message.photo[-1]
+    try:
+        photo = update.message.photo[-1]
+        print(f"✅ Photo received: size {photo.file_size}")
+    except Exception as e:
+        print(f"❌ Failed to get photo: {e}")
+        return
+    
     file = await photo.get_file()
     
-    # Save to temporary location
+    # Save image
     img_index = len(user_sessions[user_id]["images"]) + 1
     img_path = f"/tmp/user_{user_id}_{img_index}.png"
-    await file.download_to_drive(img_path)
+    
+    print(f"💾 Saving image {img_index} to: {img_path}")
+    try:
+        await file.download_to_drive(img_path)
+        print(f"✅ Image saved: {os.path.getsize(img_path)} bytes")
+        
+        # Test if image is readable
+        test_img = Image.open(img_path)
+        print(f"📐 Image size: {test_img.size}, format: {test_img.format}")
+        test_img.close()
+    except Exception as e:
+        print(f"❌ Failed to save image: {e}")
+        await update.message.reply_text("❌ Failed to save image")
+        return
+    
     user_sessions[user_id]["images"].append(img_path)
     
     await update.message.reply_text(f"✅ Image {img_index}/3 received")
     
     if img_index < 3:
+        print(f"⏳ Waiting for more images ({img_index}/3)")
         return
     
-    # All images received
-    await update.message.reply_text("⏳ Processing with OCR API...")
+    print("\n" + "="*80)
+    print("🎯 ALL 3 IMAGES RECEIVED - STARTING PROCESSING")
+    print("="*80)
     
     try:
-        # Use OCR API on first two images
+        # Step 1: OCR on first image
+        print("\n--- STEP 1: FRONT PAGE OCR ---")
         await update.message.reply_text("🔍 Extracting text from front page...")
         front_text = ocr_space_api(user_sessions[user_id]["images"][0])
+        print(f"✅ Front OCR: {len(front_text)} characters")
+        if front_text:
+            print(f"First 100 chars: {front_text[:100]}")
         
+        # Step 2: OCR on second image
+        print("\n--- STEP 2: BACK PAGE OCR ---")
         await update.message.reply_text("🔍 Extracting text from back page...")
         back_text = ocr_space_api(user_sessions[user_id]["images"][1])
+        print(f"✅ Back OCR: {len(back_text)} characters")
+        if back_text:
+            print(f"First 100 chars: {back_text[:100]}")
         
-        if not front_text and not back_text:
+        if not front_text.strip() and not back_text.strip():
+            print("❌ OCR extracted NO text from both images")
             await update.message.reply_text(
-                "❌ OCR failed to extract text.\n"
+                "❌ OCR failed to extract any text.\n"
                 "Please send clearer screenshots."
             )
             return
         
-        # Parse data
+        # Step 3: Parse data
+        print("\n--- STEP 3: PARSING DATA ---")
         await update.message.reply_text("📋 Parsing ID information...")
         data = parse_fayda(front_text, back_text)
         
         # Show what was found
         found_fields = [k for k, v in data.items() if v]
+        print(f"📊 Found {len(found_fields)} fields: {found_fields}")
+        
         if found_fields:
             summary = f"📊 *Found {len(found_fields)} fields:*\n"
             for field in found_fields[:5]:
@@ -101,9 +140,24 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 summary += f"• {field}: {value[:30]}{'...' if len(value) > 30 else ''}\n"
             await update.message.reply_text(summary, parse_mode='Markdown')
         
-        # Generate ID
+        # Step 4: Generate ID
+        print("\n--- STEP 4: GENERATING ID ---")
+        print(f"📁 Using 3rd image for photo/QR: {user_sessions[user_id]['images'][2]}")
+        print(f"📋 Data to place: {found_fields}")
+        
         await update.message.reply_text("🎨 Generating ID card...")
         output_path = f"/tmp/user_{user_id}_final.png"
+        debug_path = f"/tmp/user_{user_id}_debug.png"
+        
+        print(f"📤 Output paths:")
+        print(f"   Final: {output_path}")
+        print(f"   Debug: {debug_path}")
+        
+        # Check if 3rd image exists
+        if not os.path.exists(user_sessions[user_id]["images"][2]):
+            print(f"❌ 3rd image not found at: {user_sessions[user_id]['images'][2]}")
+            await update.message.reply_text("❌ Error: Could not find photo/QR image")
+            return
         
         success = generate_id(
             data, 
@@ -111,63 +165,93 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             output_path
         )
         
-        # ==================== THIS IS THE UPDATED PART ====================
+        print(f"\n--- STEP 5: SENDING RESULTS ---")
+        print(f"✅ Generation success: {success}")
+        
         if success:
-            # Send debug version first (if it exists)
-            debug_path = output_path.replace(".png", "_debug.png")
-            if os.path.exists(debug_path):
+            # Check if files were created
+            print(f"📁 Checking output files:")
+            print(f"   Final exists: {os.path.exists(output_path)} - {os.path.getsize(output_path) if os.path.exists(output_path) else 0} bytes")
+            print(f"   Debug exists: {os.path.exists(debug_path)} - {os.path.getsize(debug_path) if os.path.exists(debug_path) else 0} bytes")
+            
+            # Send debug version if exists
+            if os.path.exists(debug_path) and os.path.getsize(debug_path) > 0:
+                print("📤 Sending debug image...")
                 try:
                     with open(debug_path, "rb") as debug_file:
                         await update.message.reply_photo(
                             photo=debug_file,
-                            caption="🔍 *DEBUG VERSION*\n• Green dots: Text placed\n• Red dots: Missing text\n• Boxes: Image areas",
+                            caption="🔍 *DEBUG VERSION*",
                             parse_mode='Markdown'
                         )
+                    print("✅ Debug image sent")
                 except Exception as debug_err:
-                    print(f"⚠️ Could not send debug image: {debug_err}")
+                    print(f"❌ Failed to send debug image: {debug_err}")
+            else:
+                print("⚠️ No debug image found or empty")
             
             # Send final version
-            try:
-                with open(output_path, "rb") as final_file:
-                    # Create informative caption
-                    found_fields = [k for k, v in data.items() if v]
-                    caption = f"✅ *ID Generated!*\nFound {len(found_fields)} fields"
-                    
-                    if found_fields:
-                        # Show first 5 fields found
-                        fields_list = []
-                        for field in found_fields[:5]:
-                            value = data.get(field, "")
-                            if len(value) > 15:
-                                value = value[:15] + "..."
-                            fields_list.append(f"{field}: {value}")
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                print("📤 Sending final image...")
+                try:
+                    with open(output_path, "rb") as final_file:
+                        caption = f"✅ *ID Generated!*\nFound {len(found_fields)} fields"
+                        if found_fields:
+                            caption += f": {', '.join(found_fields[:3])}"
+                            if len(found_fields) > 3:
+                                caption += f" and {len(found_fields)-3} more"
                         
-                        caption += f":\n" + "\n".join(f"• {item}" for item in fields_list)
-                        
-                        if len(found_fields) > 5:
-                            caption += f"\n• ...and {len(found_fields)-5} more"
-                    
-                    await update.message.reply_photo(
-                        photo=final_file,
-                        caption=caption,
-                        parse_mode='Markdown'
-                    )
-            except Exception as final_err:
-                print(f"⚠️ Could not send final image: {final_err}")
-                await update.message.reply_text("❌ Error sending image")
+                        await update.message.reply_photo(
+                            photo=final_file,
+                            caption=caption,
+                            parse_mode='Markdown'
+                        )
+                    print("✅ Final image sent")
+                except Exception as final_err:
+                    print(f"❌ Failed to send final image: {final_err}")
+                    await update.message.reply_text("❌ Error sending image")
+            else:
+                print(f"❌ Final image not found or empty at: {output_path}")
+                await update.message.reply_text("❌ Generated image is empty")
         else:
-            await update.message.reply_text("❌ Failed to generate ID")
-        # ==================== END OF UPDATED PART ====================
+            print("❌ generate_id() returned False")
+            await update.message.reply_text("❌ Failed to generate ID image")
     
     except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
-        print(f"Error: {e}")
+        print(f"\n" + "!"*80)
+        print(f"❌ UNEXPECTED ERROR in handle_photo:")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {e}")
+        import traceback
+        traceback.print_exc()
+        print("!"*80)
+        
+        await update.message.reply_text(f"❌ Processing error: {str(e)[:100]}")
     
     finally:
         # Cleanup
+        print(f"\n🧹 Cleaning up user {user_id} session...")
         if user_id in user_sessions:
+            # List files to delete
+            for i, img_path in enumerate(user_sessions[user_id]["images"]):
+                if os.path.exists(img_path):
+                    try:
+                        os.remove(img_path)
+                        print(f"   Deleted image {i+1}: {img_path}")
+                    except:
+                        pass
+            
+            # Delete output files
+            for path in [output_path, debug_path]:
+                if 'path' in locals() and os.path.exists(path):
+                    try:
+                        os.remove(path)
+                        print(f"   Deleted: {path}")
+                    except:
+                        pass
+            
             del user_sessions[user_id]
-
+            print(f"✅ Session cleaned up")
 # ================= OCR =================
 
 def ocr_image(path: str) -> str:
@@ -447,139 +531,36 @@ def parse_fayda(front_text: str, back_text: str) -> dict:
 # ================= IMAGE GENERATION =================
 
 def generate_id(data: dict, photo_qr_path: str, output_path: str):
-    """Generate ID card with data and cropped images."""
+    """MINIMAL TEST VERSION - just place photos, no text."""
+    print(f"\n🎨 GENERATE_ID CALLED - MINIMAL TEST")
+    print(f"   Photo/QR path: {photo_qr_path}")
+    print(f"   Output path: {output_path}")
+    print(f"   Data fields: {[k for k, v in data.items() if v]}")
+    
     try:
-        print(f"\n🎨 GENERATING ID CARD - DEBUG MODE")
-        print(f"Data received: {len(data)} fields")
+        # Just create a simple image to test
+        test_img = Image.new('RGB', (500, 300), color='white')
+        draw = ImageDraw.Draw(test_img)
+        draw.text((10, 10), "TEST IMAGE - Bot is working!", fill='black')
+        draw.text((10, 40), f"Found {len([v for v in data.values() if v])} fields", fill='blue')
         
-        # SHOW ALL DATA
-        print("📋 ALL DATA RECEIVED:")
-        for key, value in data.items():
-            print(f"  {key:12}: '{value}'")
+        # Save it
+        test_img.save(output_path)
+        print(f"✅ Created test image at {output_path}")
         
-        # Open template
-        template = Image.open(TEMPLATE_PATH).convert("RGBA")
-        print(f"📐 Template size: {template.size}")
-        
-        draw = ImageDraw.Draw(template)
-        
-        # Try different font approaches
-        font_success = False
-        try:
-            if os.path.exists(FONT_PATH):
-                font_large = ImageFont.truetype(FONT_PATH, 42)
-                font_medium = ImageFont.truetype(FONT_PATH, 36)
-                font_small = ImageFont.truetype(FONT_PATH, 32)
-                print(f"✅ Font loaded: {FONT_PATH}")
-                font_success = True
-            else:
-                print(f"❌ Font file not found: {FONT_PATH}")
-                raise FileNotFoundError
-        except Exception as font_error:
-            print(f"⚠️ Font error: {font_error}")
-            print("🔄 Using default font")
-            font_large = ImageFont.load_default()
-            font_medium = ImageFont.load_default()
-            font_small = ImageFont.load_default()
-        
-        # Test font by drawing a test text
-        test_position = (50, 50)
-        draw.text(test_position, "TEST FONT", fill="red", font=font_large)
-        print(f"🧪 Test text drawn at {test_position} in RED")
-        
-        print("\n📝 PLACING TEXT AT COORDINATES:")
-        
-        # FRONT SIDE with your exact coordinates
-        front_fields = [
-            ("name", 210, 1120, font_large, "Full Name"),
-            ("dob", 210, 1235, font_medium, "Date of Birth"),
-            ("sex", 210, 1325, font_medium, "Sex"),
-            ("expiry", 210, 1410, font_medium, "Expiry Date"),
-            ("fan", 210, 1515, font_large, "FAN"),
-            ("sin", 390, 1555, font_small, "SN"),
-        ]
-        
-        for field, x, y, font, label in front_fields:
-            value = data.get(field, "")
-            if value:
-                print(f"  ✅ {label} at ({x},{y}): '{value[:20]}...'")
-                draw.text((x, y), str(value), fill="black", font=font)
-                # Draw a green dot at the position for debugging
-                draw.ellipse([(x-5, y-5), (x+5, y+5)], fill="green")
-            else:
-                print(f"  ❌ {label} at ({x},{y}): NO DATA")
-        
-        # Date of Issue (vertical)
-        issue_date = data.get("issue_date", "")
-        if issue_date:
-            print(f"  ✅ Issue Date (vertical) at (1120,360): '{issue_date}'")
-            # Draw a blue box where vertical text should go
-            draw.rectangle([(1120, 360), (1120+80, 360+780)], outline="blue", width=2)
-        
-        # BACK SIDE
-        back_fields = [
-            ("phone", 120, 1220, font_medium, "Phone"),
-            ("nationality", 120, 1320, font_medium, "Nationality"),
-            ("address", 120, 1425, font_small, "Address"),
-            ("fin", 760, 1220, font_large, "FIN"),
-        ]
-        
-        for field, x, y, font, label in back_fields:
-            value = data.get(field, "")
-            if value:
-                print(f"  ✅ {label} at ({x},{y}): '{value[:20]}...'")
-                draw.text((x, y), str(value), fill="black", font=font)
-                # Draw a red dot at the position
-                draw.ellipse([(x-5, y-5), (x+5, y+5)], fill="red")
-            else:
-                print(f"  ❌ {label} at ({x},{y}): NO DATA")
-        
-        # Draw coordinate grid for debugging
-        print("\n📐 Drawing debug grid...")
-        for x in [210, 120, 760, 390, 1120]:
-            for y in [1120, 1235, 1325, 1410, 1515, 1555, 1220, 1320, 1425, 360]:
-                draw.ellipse([(x-2, y-2), (x+2, y+2)], fill="blue")
-        
-        # Add images (keep your existing code)
-        print("\n📸 Processing images...")
-        try:
-            photo_img = Image.open(photo_qr_path).convert("RGBA")
-            print(f"  Source image: {photo_img.size}")
-            
-            # Photo
-            photo_crop = photo_img.crop((160, 70, 560, 520))
-            photo_crop = photo_crop.resize((300, 380))
-            template.paste(photo_crop, (120, 140), photo_crop)
-            print(f"  ✅ Photo: (160,70,560,520) → (120,140,420,520)")
-            
-            # Draw photo area box
-            draw.rectangle([(120, 140), (120+300, 140+380)], outline="purple", width=3)
-            
-            # QR
-            qr_crop = photo_img.crop((80, 650, 640, 1250))
-            qr_crop = qr_crop.resize((520, 520))
-            template.paste(qr_crop, (1470, 40), qr_crop)
-            print(f"  ✅ QR: (80,650,640,1250) → (1470,40,1990,560)")
-            
-            # Draw QR area box
-            draw.rectangle([(1470, 40), (1470+520, 40+520)], outline="orange", width=3)
-                
-        except Exception as img_err:
-            print(f"  ⚠️ Image error: {img_err}")
-        
-        # Save debug version
+        # Also create a debug version
         debug_path = output_path.replace(".png", "_debug.png")
-        template.save(debug_path)
-        print(f"\n✅ Debug image saved: {debug_path}")
-        
-        # Also save the normal version
-        template.save(output_path)
-        print(f"✅ Final image saved: {output_path}")
+        debug_img = Image.new('RGB', (500, 300), color='yellow')
+        debug_draw = ImageDraw.Draw(debug_img)
+        debug_draw.text((10, 10), "DEBUG IMAGE", fill='red')
+        debug_draw.text((10, 40), f"Photo path exists: {os.path.exists(photo_qr_path)}", fill='red')
+        debug_img.save(debug_path)
+        print(f"✅ Created debug image at {debug_path}")
         
         return True
         
     except Exception as e:
-        print(f"❌ Generation failed: {e}")
+        print(f"❌ generate_id failed: {e}")
         import traceback
         traceback.print_exc()
         return False
