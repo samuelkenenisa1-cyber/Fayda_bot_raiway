@@ -55,149 +55,116 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Please send /start first")
         return
     
-    # Get the highest quality photo
+    # Get photo
     photo = update.message.photo[-1]
     file = await photo.get_file()
     
-    # Create user directory
-    user_dir = os.path.join(TMP_DIR, str(user_id))
-    os.makedirs(user_dir, exist_ok=True)
-    
-    # Save image
-    img_index = len(user_sessions[user_id]) + 1
-    img_path = os.path.join(user_dir, f"{img_index}.png")
+    # Save to temporary location
+    img_index = len(user_sessions[user_id]["images"]) + 1
+    img_path = f"/tmp/user_{user_id}_{img_index}.png"
     await file.download_to_drive(img_path)
-    user_sessions[user_id].append(img_path)
+    user_sessions[user_id]["images"].append(img_path)
     
-    print(f"📸 User {user_id}: Image {img_index} saved - {os.path.getsize(img_path)} bytes")
+    await update.message.reply_text(f"✅ Image {img_index}/3 received")
     
-    # Acknowledge receipt
     if img_index < 3:
-        await update.message.reply_text(f"✅ Image {img_index}/3 received")
         return
     
     # All images received
-    await update.message.reply_text("⏳ Processing all 3 images...")
+    await update.message.reply_text("⏳ Processing with OCR API...")
     
     try:
-        print("\n" + "="*80)
-        print(f"🔄 PROCESSING USER {user_id}")
-        print("="*80)
+        # Use OCR API on first two images
+        await update.message.reply_text("🔍 Extracting text from front page...")
+        front_text = ocr_space_api(user_sessions[user_id]["images"][0])
         
-        # Save original images for debugging
-        for i, img_path in enumerate(user_sessions[user_id]):
-            print(f"📁 Image {i+1}: {img_path} ({os.path.getsize(img_path)} bytes)")
+        await update.message.reply_text("🔍 Extracting text from back page...")
+        back_text = ocr_space_api(user_sessions[user_id]["images"][1])
         
-        # Step 1: OCR on first image (front)
-        print("\n--- OCR ON FRONT PAGE ---")
-        front_text = ocr_image(user_sessions[user_id][0])
-        
-        # Save OCR result
-        front_ocr_path = os.path.join(user_dir, "front_ocr.txt")
-        with open(front_ocr_path, "w", encoding="utf-8") as f:
-            f.write(front_text)
-        print(f"💾 Saved front OCR to: {front_ocr_path}")
-        
-        # Step 2: OCR on second image (back)
-        print("\n--- OCR ON BACK PAGE ---")
-        back_text = ocr_image(user_sessions[user_id][1])
-        
-        # Save OCR result
-        back_ocr_path = os.path.join(user_dir, "back_ocr.txt")
-        with open(back_ocr_path, "w", encoding="utf-8") as f:
-            f.write(back_text)
-        print(f"💾 Saved back OCR to: {back_ocr_path}")
-        
-        # Show OCR preview in chat
-        ocr_preview = f"*OCR Results:*\n\n"
-        if front_text:
-            ocr_preview += f"*Front page (first 200 chars):*\n```\n{front_text[:200]}\n```\n\n"
-        if back_text:
-            ocr_preview += f"*Back page (first 200 chars):*\n```\n{back_text[:200]}\n```"
-        
-        await update.message.reply_text(ocr_preview, parse_mode='Markdown')
-        
-        # Parse the data
-        print("\n--- PARSING DATA ---")
-        data = parse_fayda(front_text, back_text)
-        
-        # Save parsed data
-        data_path = os.path.join(user_dir, "parsed_data.txt")
-        with open(data_path, "w", encoding="utf-8") as f:
-            for key, value in data.items():
-                f.write(f"{key}: {value}\n")
-        print(f"💾 Saved parsed data to: {data_path}")
-        
-        # Show what we found
-        found = {k: v for k, v in data.items() if v}
-        
-        print(f"\n📊 FOUND {len(found)} FIELDS:")
-        for key, value in found.items():
-            print(f"   {key}: {value}")
-        
-        if len(found) < 3:
-            fields_list = ", ".join(found.keys()) if found else "nothing"
+        if not front_text and not back_text:
             await update.message.reply_text(
-                f"⚠️ *Only found: {fields_list}*\n\n"
-                f"OCR extracted {len(front_text)+len(back_text)} characters.\n"
-                f"Please send clearer screenshots.",
-                parse_mode='Markdown'
+                "❌ OCR failed to extract text.\n"
+                "Please send clearer screenshots."
             )
             return
         
+        # Parse data
+        await update.message.reply_text("📋 Parsing ID information...")
+        data = parse_fayda(front_text, back_text)
+        
+        # Show what was found
+        found_fields = [k for k, v in data.items() if v]
+        if found_fields:
+            summary = f"📊 *Found {len(found_fields)} fields:*\n"
+            for field in found_fields[:5]:
+                value = data.get(field, "")
+                summary += f"• {field}: {value[:30]}{'...' if len(value) > 30 else ''}\n"
+            await update.message.reply_text(summary, parse_mode='Markdown')
+        
         # Generate ID
-        print("\n--- GENERATING ID CARD ---")
-        output_path = os.path.join(user_dir, "final_id.png")
-        
-        # First, let's check if template and font exist
-        print(f"🔍 Checking required files:")
-        print(f"   Template: {TEMPLATE_PATH} - {'✅ Exists' if os.path.exists(TEMPLATE_PATH) else '❌ Missing'}")
-        print(f"   Font: {FONT_PATH} - {'✅ Exists' if os.path.exists(FONT_PATH) else '❌ Missing'}")
-        
-        if not os.path.exists(TEMPLATE_PATH):
-            await update.message.reply_text("❌ Template image is missing!")
-            return
+        await update.message.reply_text("🎨 Generating ID card...")
+        output_path = f"/tmp/user_{user_id}_final.png"
         
         success = generate_id(
             data, 
-            user_sessions[user_id][2],  # Third image has photo + QR
+            user_sessions[user_id]["images"][2],  # Third image
             output_path
         )
         
+        # ==================== THIS IS THE UPDATED PART ====================
         if success:
-            print(f"✅ Generated ID saved: {output_path} ({os.path.getsize(output_path)} bytes)")
+            # Send debug version first (if it exists)
+            debug_path = output_path.replace(".png", "_debug.png")
+            if os.path.exists(debug_path):
+                try:
+                    with open(debug_path, "rb") as debug_file:
+                        await update.message.reply_photo(
+                            photo=debug_file,
+                            caption="🔍 *DEBUG VERSION*\n• Green dots: Text placed\n• Red dots: Missing text\n• Boxes: Image areas",
+                            parse_mode='Markdown'
+                        )
+                except Exception as debug_err:
+                    print(f"⚠️ Could not send debug image: {debug_err}")
             
-            # Create debug image with grid
-            debug_path = os.path.join(user_dir, "debug_grid.png")
-            create_debug_grid(TEMPLATE_PATH, debug_path)
-            print(f"✅ Debug grid saved: {debug_path}")
-            
-            # Send both images
-            with open(output_path, "rb") as photo:
-                await update.message.reply_photo(
-                    photo=photo,
-                    caption=f"✅ *ID Generated!*\nFound {len(found)} fields.",
-                    parse_mode='Markdown'
-                )
-            
-            # Send debug grid
-            with open(debug_path, "rb") as debug_photo:
-                await update.message.reply_photo(
-                    photo=debug_photo,
-                    caption="🔍 Debug: Red boxes show where text should go",
-                    parse_mode='Markdown'
-                )
+            # Send final version
+            try:
+                with open(output_path, "rb") as final_file:
+                    # Create informative caption
+                    found_fields = [k for k, v in data.items() if v]
+                    caption = f"✅ *ID Generated!*\nFound {len(found_fields)} fields"
+                    
+                    if found_fields:
+                        # Show first 5 fields found
+                        fields_list = []
+                        for field in found_fields[:5]:
+                            value = data.get(field, "")
+                            if len(value) > 15:
+                                value = value[:15] + "..."
+                            fields_list.append(f"{field}: {value}")
+                        
+                        caption += f":\n" + "\n".join(f"• {item}" for item in fields_list)
+                        
+                        if len(found_fields) > 5:
+                            caption += f"\n• ...and {len(found_fields)-5} more"
+                    
+                    await update.message.reply_photo(
+                        photo=final_file,
+                        caption=caption,
+                        parse_mode='Markdown'
+                    )
+            except Exception as final_err:
+                print(f"⚠️ Could not send final image: {final_err}")
+                await update.message.reply_text("❌ Error sending image")
         else:
-            await update.message.reply_text("❌ Failed to generate ID image")
+            await update.message.reply_text("❌ Failed to generate ID")
+        # ==================== END OF UPDATED PART ====================
     
     except Exception as e:
-        print(f"❌ ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        await update.message.reply_text(f"❌ Error: {str(e)[:200]}")
+        await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+        print(f"Error: {e}")
     
     finally:
-        # Cleanup session
+        # Cleanup
         if user_id in user_sessions:
             del user_sessions[user_id]
 
