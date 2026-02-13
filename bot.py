@@ -103,99 +103,142 @@ def parse_fayda(text: str) -> dict:
                 data["fan"] = fan_match.group(1)
     
     return data
-    def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
-    """Generate full ID card with template and extracted data."""
-    try:
+   def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
+    """Generate full ID card with template and extracted data."""    
+    try:        
+        print(f"\n🎨 GENERATING FULL ID CARD")        
+        print(f"   Template: {TEMPLATE_PATH}")        
+        print(f"   Photo/QR: {photo_qr_path}")        
+        print(f"   Output: {output_path}")        
+        
         # Check if template exists
-        if not os.path.exists(TEMPLATE_PATH):
+        if not os.path.exists(TEMPLATE_PATH):    
             print(f"❌ Template not found: {TEMPLATE_PATH}")
             return False
         
         # Open template
         template = Image.open(TEMPLATE_PATH).convert("RGBA")
         draw = ImageDraw.Draw(template)
+        print(f"   Template size: {template.size}")
         
         # Load font
         try:
             if os.path.exists(FONT_PATH):
-                font = ImageFont.truetype(FONT_PATH, 40)
-                font_small = ImageFont.truetype(FONT_PATH, 30)
+                font_large = ImageFont.truetype(FONT_PATH, 42)
+                font_medium = ImageFont.truetype(FONT_PATH, 36)
+                font_small = ImageFont.truetype(FONT_PATH, 32)
+                print(f"   ✅ Font loaded: {FONT_PATH}")
             else:
-                font = ImageFont.load_default()
+                print(f"   ⚠️ Font not found, using default")
+                font_large = ImageFont.load_default()
+                font_medium = ImageFont.load_default()
                 font_small = ImageFont.load_default()
-        except:
-            font = ImageFont.load_default()
+        except Exception as font_err:
+            print(f"   ⚠️ Font error: {font_err}")
+            font_large = ImageFont.load_default()
+            font_medium = ImageFont.load_default()
             font_small = ImageFont.load_default()
         
-        # FRONT SIDE - Place text at your coordinates
-        # Full Name (x: 210, y: 1120)
+        print("\n📝 PLACING TEXT ON TEMPLATE:")
+        
+        # FRONT SIDE - Using your exact coordinates
+        # 1️⃣ Full Name (x: 210, y: 1120)
         if data.get("name"):
-            draw.text((210, 1120), data["name"][:40], fill="black", font=font)
+            name_text = data["name"][:40]  # Truncate if too long
+            draw.text((210, 1120), name_text, fill="black", font=font_large)
+            print(f"   ✅ Name at (210,1120): {name_text[:20]}...")
         
-        # Date of Birth (x: 210, y: 1235)
+        # 2️⃣ Date of Birth (x: 210, y: 1235)
         if data.get("dob"):
-            draw.text((210, 1235), data["dob"], fill="black", font=font)
+            draw.text((210, 1235), data["dob"], fill="black", font=font_medium)
+            print(f"   ✅ DOB at (210,1235): {data['dob']}")
         
-        # Sex (x: 210, y: 1325)
+        # 3️⃣ Sex (x: 210, y: 1325)
         if data.get("sex"):
-            draw.text((210, 1325), data["sex"], fill="black", font=font)
+            draw.text((210, 1325), data["sex"], fill="black", font=font_medium)
+            print(f"   ✅ Sex at (210,1325): {data['sex']}")
         
-        # Expiry Date (x: 210, y: 1410)
+        # 4️⃣ Expiry Date (x: 210, y: 1410)
         if data.get("expiry"):
-            draw.text((210, 1410), data["expiry"], fill="black", font=font)
+            draw.text((210, 1410), data["expiry"], fill="black", font=font_medium)
+            print(f"   ✅ Expiry at (210,1410): {data['expiry']}")
         
-        # FAN (x: 210, y: 1515)
+        # 5️⃣ FAN (x: 210, y: 1515)
         if data.get("fan"):
-            # Format with spaces
             fan = data["fan"]
-            if len(fan) == 16:
-                fan = f"{fan[:4]} {fan[4:8]} {fan[8:12]} {fan[12:]}"
-            draw.text((210, 1515), fan, fill="black", font=font)
+            # Format with spaces every 4 digits
+            if len(fan) >= 16:
+                fan = f"{fan[:4]} {fan[4:8]} {fan[8:12]} {fan[12:16]}"
+            draw.text((210, 1515), fan, fill="black", font=font_large)
+            print(f"   ✅ FAN at (210,1515): {fan}")
+        
+        # 6️⃣ SN (x: 390, y: 1555) - if available
+        if data.get("sin"):
+            draw.text((390, 1555), data["sin"], fill="black", font=font_small)
+            print(f"   ✅ SN at (390,1555): {data['sin']}")
         
         # BACK SIDE
-        # Phone (x: 120, y: 1220)
+        # 8️⃣ Phone Number (x: 120, y: 1220)
         if data.get("phone"):
-            draw.text((120, 1220), data["phone"], fill="black", font=font)
+            draw.text((120, 1220), data["phone"], fill="black", font=font_medium)
+            print(f"   ✅ Phone at (120,1220): {data['phone']}")
         
-        # Nationality (x: 120, y: 1320)
+        # 9️⃣ Nationality (x: 120, y: 1320)
         if data.get("nationality"):
-            draw.text((120, 1320), data["nationality"], fill="black", font=font)
+            draw.text((120, 1320), data["nationality"], fill="black", font=font_medium)
+            print(f"   ✅ Nationality at (120,1320): {data['nationality']}")
         
-        # Address (x: 120, y: 1425)
+        # 🔟 Address (x: 120, y: 1425)
         if data.get("address"):
-            address = data["address"][:50]
+            address = data["address"][:50]  # Truncate
             draw.text((120, 1425), address, fill="black", font=font_small)
+            print(f"   ✅ Address at (120,1425): {address[:20]}...")
         
-        # FIN (x: 760, y: 1220)
+        # 1️⃣1️⃣ FIN (x: 760, y: 1220)
         if data.get("fin"):
-            draw.text((760, 1220), data["fin"], fill="black", font=font)
+            draw.text((760, 1220), data["fin"], fill="black", font=font_large)
+            print(f"   ✅ FIN at (760,1220): {data['fin']}")
         
         # Add Photo and QR Code
+        print("\n📸 ADDING PHOTO AND QR CODE:")
         try:
             if os.path.exists(photo_qr_path):
                 img = Image.open(photo_qr_path).convert("RGBA")
+                print(f"   Source image: {img.size}")
                 
                 # Crop Photo (160, 70, 560, 520)
-                photo = img.crop((160, 70, 560, 520))
-                photo = photo.resize((300, 380))
-                template.paste(photo, (120, 140), photo)
+                try:
+                    photo = img.crop((160, 70, 560, 520))
+                    photo = photo.resize((300, 380))
+                    template.paste(photo, (120, 140), photo)
+                    print(f"   ✅ Photo placed at (120,140)")
+                except Exception as crop_err:
+                    print(f"   ⚠️ Photo crop failed: {crop_err}")
                 
                 # Crop QR Code (80, 650, 640, 1250)
-                qr = img.crop((80, 650, 640, 1250))
-                qr = qr.resize((520, 520))
-                template.paste(qr, (1470, 40), qr)
+                try:
+                    qr = img.crop((80, 650, 640, 1250))
+                    qr = qr.resize((520, 520))
+                    template.paste(qr, (1470, 40), qr)
+                    print(f"   ✅ QR code placed at (1470,40)")
+                except Exception as qr_err:
+                    print(f"   ⚠️ QR crop failed: {qr_err}")
+            else:
+                print(f"   ❌ Photo/QR file not found: {photo_qr_path}")
         except Exception as img_err:
-            print(f"⚠️ Image placement error: {img_err}")
+            print(f"   ⚠️ Image processing error: {img_err}")
         
         # Save final image
         template.save(output_path)
-        print(f"✅ Full ID generated: {output_path}")
+        print(f"\n✅ Full ID generated and saved to: {output_path}")
+        print(f"   File size: {os.path.getsize(output_path)} bytes")
         return True
         
     except Exception as e:
         print(f"❌ Generation failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
-
 # ================= HELPER FUNCTIONS =================
 def cleanup_user_session(user_id: int):
     """Clean up user session and files."""
