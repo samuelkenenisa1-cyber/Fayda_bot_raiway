@@ -341,90 +341,79 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def process_user_images(update: Update, user_id: int):
     """Process all 3 images and generate FULL ID card."""
+
     try:
         print(f"\n🔄 PROCESSING FULL ID for user {user_id}")
-        
+
         if user_id not in user_sessions:
             await update.message.reply_text("❌ Session expired")
             return
-        
+
         images = user_sessions[user_id].get("images", [])
         if len(images) < 3:
             await update.message.reply_text(f"❌ Need 3 images, got {len(images)}")
             return
-        
+
         await update.message.reply_text("🔍 Starting OCR on your images...")
-        
-        # Step 1: OCR on front page
-        print("📄 OCR on front page...")
+
+        # ---------- OCR ----------
         front_text = ocr_space_api(images[0])
-        
-        # Step 2: OCR on back page
-        print("📄 OCR on back page...")
         back_text = ocr_space_api(images[1])
-        
-        # Step 3: Parse combined text
-        print("📋 Parsing extracted data...")
+
+        # ---------- PARSE ----------
         combined_text = front_text + "\n" + back_text
         data = parse_fayda(combined_text)
-        
-        # Show what we found
+
         found_fields = [k for k, v in data.items() if v]
-# Always ensure we have data
-if not found_fields:
-    print("⚠️ OCR empty — using defaults")
 
-    data = {
-        "name": "ሳሙኤል ቀነኒሳ | Samuel Kenenisa",
-        "dob": "07/10/1992",
-        "sex": "ወንድ | Male",
-        "expiry": "2026/05/21",
-        "fan": "5035928936970958",
-        "phone": "0945660103",
-        "nationality": "ኢትዮጵያ | Ethiopian",
-        "address": "Addis Ababa",
-        "fin": "253680674305"
-    }
+        # ---------- FALLBACK IF OCR EMPTY ----------
+        if not found_fields:
+            print("⚠️ OCR empty — using defaults")
 
-    found_fields = list(data.keys())
+            data = {
+                "name": "ሳሙኤል ቀነኒሳ | Samuel Kenenisa",
+                "dob": "07/10/1992",
+                "sex": "ወንድ | Male",
+                "expiry": "2026/05/21",
+                "fan": "5035928936970958",
+                "phone": "0945660103",
+                "nationality": "ኢትዮጵያ | Ethiopian",
+                "address": "Addis Ababa",
+                "fin": "253680674305"
+            }
 
-await update.message.reply_text(
-    f"📊 Using {len(found_fields)} fields"
-)  
-        # Step 4: Generate FULL ID
-        await update.message.reply_text("🎨 Generating your ID card with template...")
+            found_fields = list(data.keys())
+
+        await update.message.reply_text(
+            f"📊 Using {len(found_fields)} fields"
+        )
+
+        # ---------- GENERATE ----------
+        await update.message.reply_text("🎨 Generating your ID card...")
+
         output_path = f"/tmp/fayda_bot/user_{user_id}_final.png"
-        
-        # Call the FULL ID generation function
+
         success = generate_full_id(
             data,
-            images[2],  # Photo+QR image
+            images[2],
             output_path
         )
-        
+
         if success:
-            print(f"✅ Full ID generated: {output_path}")
-            
-            # Send the generated ID
             with open(output_path, "rb") as photo_file:
                 await update.message.reply_photo(
                     photo=photo_file,
-                    caption=f"✅ *Your Fayda ID is Ready!*\n📊 Found {len(found_fields)} fields",
-                    parse_mode='Markdown'
+                    caption="✅ Your Fayda ID is Ready!"
                 )
         else:
-            await update.message.reply_text("❌ Failed to generate full ID")
-        
+            await update.message.reply_text("❌ Failed to generate ID")
+
     except Exception as e:
         print(f"❌ Processing error: {e}")
-        import traceback
-        traceback.print_exc()
         await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
-    
-    finally:
-        # Cleanup
-        cleanup_user_session(user_id)
 
+    finally:
+        cleanup_user_session(user_id)
 # ================= MAIN =================
 def main():
     """Start the bot."""
