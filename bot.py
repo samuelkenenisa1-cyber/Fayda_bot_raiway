@@ -75,7 +75,14 @@ def ocr_space_api(image_path: str, language: str = 'eng') -> str:
 
 # ================= PARSING FUNCTION =================
 def parse_fayda(text: str) -> dict:
-    """Extract ID information from OCR text."""
+    """
+    Robust Fayda ID parser (works with messy OCR text)
+    Extracts fields using regex + keyword matching.
+    """
+
+    print("\n📋 RAW OCR TEXT:")
+    print(text[:500])  # debug preview
+
     data = {
         "name": "",
         "dob": "",
@@ -88,77 +95,84 @@ def parse_fayda(text: str) -> dict:
         "phone": "",
         "sin": ""
     }
-    
-    lines = text.split('\n')
-    print(f"📄 Parsing {len(lines)} lines of text")
-    
-    for line in lines:
-        line_lower = line.lower()
-        
-        # Name
-        if "ሙሉ ስም" in line or "full name" in line_lower:
-            # Get next line or extract from this line
-            parts = line.split()
-            for i, part in enumerate(parts):
-                part_lower = part.lower()
-                if "ሳሙኤል" in part or "samuel" in part_lower:
-                    name_parts = parts[i:i+3]
-                    data["name"] = " ".join(name_parts)
-                    print(f"✅ Found name: {data['name']}")
-                    break
-        
-        # Date of Birth
-        if "የትውልድ" in line or "date of birth" in line_lower or "dob" in line_lower:
-            date_match = re.search(r'\d{2}/\d{2}/\d{4}', line)
-            if date_match:
-                data["dob"] = date_match.group()
-                print(f"✅ Found DOB: {data['dob']}")
-        
-        # Phone
-        if "ስልክ" in line or "phone" in line_lower:
-            phone_match = re.search(r'(\d{10})', line.replace(" ", ""))
-            if phone_match:
-                data["phone"] = phone_match.group(1)
-                print(f"✅ Found phone: {data['phone']}")
-        
-        # FAN (16-digit number)
-        if "fan" in line_lower or "fcn" in line_lower or "ካርድ" in line:
-            fan_match = re.search(r'(\d{16})', line.replace(" ", ""))
-            if fan_match:
-                data["fan"] = fan_match.group(1)
-                print(f"✅ Found FAN: {data['fan']}")
-        
-        # FIN
-        if "fin" in line_lower:
-            fin_match = re.search(r'(\d{12,16})', line.replace(" ", ""))
-            if fin_match:
-                data["fin"] = fin_match.group(1)
-                print(f"✅ Found FIN: {data['fin']}")
-        
-        # Sex
-        if "sex" in line_lower or "ፆታ" in line:
-            if "male" in line_lower or "ወንድ" in line:
-                data["sex"] = "ወንድ | Male"
-                print(f"✅ Found sex: Male")
-            elif "female" in line_lower or "ሴት" in line:
-                data["sex"] = "ሴት | Female"
-                print(f"✅ Found sex: Female")
-        
-        # Nationality
-        if "ዜግነት" in line or "nationality" in line_lower:
-            if "ኢትዮጵያ" in line or "ethiopian" in line_lower:
-                data["nationality"] = "ኢትዮጵያ | Ethiopian"
-                print(f"✅ Found nationality")
-        
-        # Expiry
-        if "expiry" in line_lower or "የሚያበቃበት" in line:
-            expiry_match = re.search(r'\d{4}/\d{2}/\d{2}', line)
-            if expiry_match:
-                data["expiry"] = expiry_match.group()
-                print(f"✅ Found expiry: {data['expiry']}")
-    
-    return data
 
+    # normalize text
+    text_clean = re.sub(r"\s+", " ", text.lower())
+
+    # ================= NAME =================
+    # look for line after "Full Name"
+    name_match = re.search(
+        r"(full\s*name|ሙሉ\s*ስም)[^\n]*\n?([^\n]+)",
+        text,
+        re.IGNORECASE
+    )
+    if name_match:
+        data["name"] = name_match.group(2).strip()
+        print("✅ Name:", data["name"])
+
+    # ================= DOB =================
+    dob_match = re.search(
+        r"(date\s*of\s*birth|dob|የትውልድ)[^\d]*(\d{2}/\d{2}/\d{4})",
+        text,
+        re.IGNORECASE
+    )
+    if dob_match:
+        data["dob"] = dob_match.group(2)
+        print("✅ DOB:", data["dob"])
+
+    # ================= EXPIRY =================
+    expiry_match = re.search(
+        r"(expiry|valid|የሚያበቃ)[^\d]*(\d{4}/\d{2}/\d{2})",
+        text,
+        re.IGNORECASE
+    )
+    if expiry_match:
+        data["expiry"] = expiry_match.group(2)
+        print("✅ Expiry:", data["expiry"])
+
+    # ================= SEX =================
+    if re.search(r"\bmale\b|ወንድ", text_clean):
+        data["sex"] = "ወንድ | Male"
+        print("✅ Sex: Male")
+
+    elif re.search(r"\bfemale\b|ሴት", text_clean):
+        data["sex"] = "ሴት | Female"
+        print("✅ Sex: Female")
+
+    # ================= PHONE =================
+    phone_match = re.search(r"09\d{8}", text_clean)
+    if phone_match:
+        data["phone"] = phone_match.group()
+        print("✅ Phone:", data["phone"])
+
+    # ================= FAN (16 digits) =================
+    fan_match = re.search(r"\b\d{16}\b", text_clean)
+    if fan_match:
+        data["fan"] = fan_match.group()
+        print("✅ FAN:", data["fan"])
+
+    # ================= FIN =================
+    fin_match = re.search(r"(fin)[^\d]*(\d{12,16})", text_clean)
+    if fin_match:
+        data["fin"] = fin_match.group(2)
+        print("✅ FIN:", data["fin"])
+
+    # ================= NATIONALITY =================
+    if "ethiopia" in text_clean or "ኢትዮጵ" in text_clean:
+        data["nationality"] = "ኢትዮጵያ | Ethiopian"
+        print("✅ Nationality found")
+
+    # ================= ADDRESS =================
+    address_match = re.search(
+        r"(address|አድራሻ)[^\n]*\n?([^\n]+)",
+        text,
+        re.IGNORECASE
+    )
+    if address_match:
+        data["address"] = address_match.group(2).strip()
+        print("✅ Address:", data["address"])
+
+    return data
 # ================= FULL ID GENERATION FUNCTION =================
 def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
     """Generate full ID card with template and extracted data."""
