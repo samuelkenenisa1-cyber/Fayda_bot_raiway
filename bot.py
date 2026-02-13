@@ -175,78 +175,81 @@ def parse_fayda(text: str) -> dict:
     return data
 # ================= FULL ID GENERATION FUNCTION =================
 def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
-    """Generate full ID card with template and extracted data."""
-
-    print("\n🎨 GENERATING FULL ID CARD")
+    """Generate full ID card with guaranteed visible text + debug boxes."""
 
     try:
-        template = Image.open(TEMPLATE_PATH).convert("RGB")
+        print("\n🎨 GENERATING ID")
+
+        if not os.path.exists(TEMPLATE_PATH):
+            print("❌ Template missing")
+            return False
+
+        template = Image.open(TEMPLATE_PATH).convert("RGBA")
         draw = ImageDraw.Draw(template)
+
+        W, H = template.size
+        print("Template size:", W, H)
 
         # ---------- FONT ----------
         try:
-            font_large = ImageFont.truetype(FONT_PATH, 42)
-            font_medium = ImageFont.truetype(FONT_PATH, 36)
-            font_small = ImageFont.truetype(FONT_PATH, 32)
+            font = ImageFont.truetype(FONT_PATH, int(H * 0.03))
         except:
-            font_large = ImageFont.load_default()
-            font_medium = ImageFont.load_default()
-            font_small = ImageFont.load_default()
+            font = ImageFont.load_default()
 
-        # ---------- FORCE FALLBACK VALUES ----------
-        defaults = {
-            "name": "NOT FOUND",
-            "dob": "00/00/0000",
-            "sex": "UNKNOWN",
-            "expiry": "0000/00/00",
-            "fan": "0000000000000000",
-            "phone": "0000000000",
-            "nationality": "ETHIOPIAN",
-            "address": "ADDIS ABABA",
-            "fin": "000000000000",
-            "sin": "000000"
-        }
+        # ---------- HELPER ----------
+        def place(label, value, x_ratio, y_ratio):
+            """
+            Places text using percentage position.
+            This works on ANY template size.
+            """
 
-        for k in defaults:
-            if not data.get(k):
-                data[k] = defaults[k]
+            x = int(W * x_ratio)
+            y = int(H * y_ratio)
 
-        print("📝 Writing fields...")
+            text = value if value else f"[{label}]"
 
-        # ---------- FRONT ----------
-        draw.text((210, 1120), data["name"][:40], fill="black", font=font_large)
-        draw.text((210, 1235), data["dob"], fill="black", font=font_medium)
-        draw.text((210, 1325), data["sex"], fill="black", font=font_medium)
-        draw.text((210, 1410), data["expiry"], fill="black", font=font_medium)
+            # DEBUG box
+            draw.rectangle(
+                (x - 5, y - 5, x + 400, y + 60),
+                outline="red",
+                width=3
+            )
 
-        # FAN formatting safe
-        fan = re.sub(r"\D", "", data["fan"])
-        if len(fan) >= 16:
-            fan = f"{fan[:4]} {fan[4:8]} {fan[8:12]} {fan[12:16]}"
-        draw.text((210, 1515), fan, fill="black", font=font_large)
+            draw.text((x, y), text, fill=(0, 0, 0), font=font)
 
-        draw.text((390, 1555), data["sin"], fill="black", font=font_small)
+            print(f"Placed {label} at", x, y, "=", text[:20])
 
-        # ---------- BACK ----------
-        draw.text((120, 1220), data["phone"], fill="black", font=font_medium)
-        draw.text((120, 1320), data["nationality"], fill="black", font=font_medium)
-        draw.text((120, 1425), data["address"][:50], fill="black", font=font_small)
-        draw.text((760, 1220), data["fin"], fill="black", font=font_large)
+        # ---------- PLACE ALL FIELDS ----------
+        place("NAME", data.get("name"), 0.10, 0.55)
+        place("DOB", data.get("dob"), 0.10, 0.60)
+        place("SEX", data.get("sex"), 0.10, 0.64)
+        place("EXPIRY", data.get("expiry"), 0.10, 0.68)
+        place("FAN", data.get("fan"), 0.10, 0.73)
+
+        place("PHONE", data.get("phone"), 0.06, 0.55)
+        place("NATIONALITY", data.get("nationality"), 0.06, 0.60)
+        place("ADDRESS", data.get("address"), 0.06, 0.65)
+        place("FIN", data.get("fin"), 0.55, 0.55)
 
         # ---------- PHOTO + QR ----------
-        print("📸 Adding photo + QR")
+        try:
+            if os.path.exists(photo_qr_path):
+                src = Image.open(photo_qr_path).convert("RGBA")
 
-        img = Image.open(photo_qr_path).convert("RGB")
+                # Photo (left)
+                photo = src.crop((160, 70, 560, 520))
+                photo = photo.resize((int(W * 0.15), int(H * 0.22)))
+                template.paste(photo, (int(W * 0.06), int(H * 0.05)))
 
-        # crop photo
-        photo = img.crop((160, 70, 560, 520))
-        photo = photo.resize((300, 380))
-        template.paste(photo, (120, 140))
+                # QR (right)
+                qr = src.crop((80, 650, 640, 1250))
+                qr = qr.resize((int(W * 0.20), int(H * 0.20)))
+                template.paste(qr, (int(W * 0.70), int(H * 0.05)))
 
-        # crop QR
-        qr = img.crop((80, 650, 640, 1250))
-        qr = qr.resize((520, 520))
-        template.paste(qr, (1470, 40))
+                print("✅ Photo + QR placed")
+
+        except Exception as e:
+            print("Photo/QR error:", e)
 
         template.save(output_path)
         print("✅ ID saved:", output_path)
