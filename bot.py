@@ -259,6 +259,7 @@ def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
     except Exception as e:
         print("❌ Generation failed:", e)
         return False
+        print("TEMPLATE SIZE:", template.size)
 # ================= CLEANUP FUNCTION =================
 def cleanup_user_session(user_id: int):
     """Clean up user session and files."""
