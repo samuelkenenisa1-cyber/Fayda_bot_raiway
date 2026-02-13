@@ -103,16 +103,16 @@ def parse_fayda(text: str) -> dict:
                 data["fan"] = fan_match.group(1)
     
     return data
-   def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
-    """Generate full ID card with template and extracted data."""    
-    try:        
-        print(f"\n🎨 GENERATING FULL ID CARD")        
-        print(f"   Template: {TEMPLATE_PATH}")        
-        print(f"   Photo/QR: {photo_qr_path}")        
-        print(f"   Output: {output_path}")        
-        
+  def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
+    """Generate full ID card with template and extracted data."""
+    print(f"\n🎨 GENERATING FULL ID CARD")
+    print(f"   Template: {TEMPLATE_PATH}")
+    print(f"   Photo/QR: {photo_qr_path}")
+    print(f"   Output: {output_path}")
+    
+    try:
         # Check if template exists
-        if not os.path.exists(TEMPLATE_PATH):    
+        if not os.path.exists(TEMPLATE_PATH):
             print(f"❌ Template not found: {TEMPLATE_PATH}")
             return False
         
@@ -144,7 +144,7 @@ def parse_fayda(text: str) -> dict:
         # FRONT SIDE - Using your exact coordinates
         # 1️⃣ Full Name (x: 210, y: 1120)
         if data.get("name"):
-            name_text = data["name"][:40]  # Truncate if too long
+            name_text = data["name"][:40]
             draw.text((210, 1120), name_text, fill="black", font=font_large)
             print(f"   ✅ Name at (210,1120): {name_text[:20]}...")
         
@@ -166,13 +166,12 @@ def parse_fayda(text: str) -> dict:
         # 5️⃣ FAN (x: 210, y: 1515)
         if data.get("fan"):
             fan = data["fan"]
-            # Format with spaces every 4 digits
             if len(fan) >= 16:
                 fan = f"{fan[:4]} {fan[4:8]} {fan[8:12]} {fan[12:16]}"
             draw.text((210, 1515), fan, fill="black", font=font_large)
             print(f"   ✅ FAN at (210,1515): {fan}")
         
-        # 6️⃣ SN (x: 390, y: 1555) - if available
+        # 6️⃣ SN (x: 390, y: 1555)
         if data.get("sin"):
             draw.text((390, 1555), data["sin"], fill="black", font=font_small)
             print(f"   ✅ SN at (390,1555): {data['sin']}")
@@ -190,7 +189,7 @@ def parse_fayda(text: str) -> dict:
         
         # 🔟 Address (x: 120, y: 1425)
         if data.get("address"):
-            address = data["address"][:50]  # Truncate
+            address = data["address"][:50]
             draw.text((120, 1425), address, fill="black", font=font_small)
             print(f"   ✅ Address at (120,1425): {address[:20]}...")
         
@@ -231,7 +230,6 @@ def parse_fayda(text: str) -> dict:
         # Save final image
         template.save(output_path)
         print(f"\n✅ Full ID generated and saved to: {output_path}")
-        print(f"   File size: {os.path.getsize(output_path)} bytes")
         return True
         
     except Exception as e:
