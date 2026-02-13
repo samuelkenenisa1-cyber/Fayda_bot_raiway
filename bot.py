@@ -1,10 +1,11 @@
-# ================= IMPORTS =================
 import os
 import re
-import asyncio
-from PIL import Image, ImageDraw, ImageFont
-import requests
+import json
 import base64
+import glob
+import urllib.request
+import urllib.parse
+from PIL import Image, ImageDraw, ImageFont
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -27,12 +28,12 @@ user_sessions = {}
 
 # ================= OCR FUNCTION =================
 def ocr_space_api(image_path: str, language: str = 'eng') -> str:
-    """Use OCR.Space API for text extraction."""
+    """Use OCR.Space API with urllib (no requests module needed)"""
     try:
         with open(image_path, 'rb') as image_file:
             img_base64 = base64.b64encode(image_file.read()).decode('utf-8')
         
-        url = "https://api.ocr.space/parse/image"
+        # Prepare data
         payload = {
             'base64Image': f'data:image/png;base64,{img_base64}',
             'language': language,
@@ -40,9 +41,22 @@ def ocr_space_api(image_path: str, language: str = 'eng') -> str:
             'OCREngine': 2,
         }
         
-        headers = {'apikey': OCR_API_KEY, 'Content-Type': 'application/x-www-form-urlencoded'}
-        response = requests.post(url, data=payload, headers=headers)
-        result = response.json()
+        # Convert to form data
+        data = urllib.parse.urlencode(payload).encode('utf-8')
+        
+        # Create request
+        req = urllib.request.Request(
+            'https://api.ocr.space/parse/image',
+            data=data,
+            headers={
+                'apikey': OCR_API_KEY,
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+        )
+        
+        # Send request
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
         
         if result.get('IsErroredOnProcessing', False):
             print(f"❌ OCR error: {result.get('ErrorMessage', 'Unknown')}")
@@ -52,23 +66,32 @@ def ocr_space_api(image_path: str, language: str = 'eng') -> str:
         for item in result.get('ParsedResults', []):
             parsed_text += item.get('ParsedText', '') + "\n"
         
-        print(f"✅ OCR: {len(parsed_text)} chars")
+        print(f"✅ OCR extracted {len(parsed_text)} characters")
         return parsed_text.strip()
         
     except Exception as e:
-        print(f"❌ OCR failed: {e}")
+        print(f"❌ OCR API failed: {e}")
         return ""
+
+# ================= PARSING FUNCTION =================
 def parse_fayda(text: str) -> dict:
     """Extract ID information from OCR text."""
     data = {
-        "name": "", "dob": "", "sex": "", "expiry": "",
-        "fan": "", "fin": "", "nationality": "", 
-        "address": "", "phone": ""
+        "name": "",
+        "dob": "",
+        "sex": "",
+        "expiry": "",
+        "fan": "",
+        "fin": "",
+        "nationality": "",
+        "address": "",
+        "phone": "",
+        "sin": ""
     }
     
     lines = text.split('\n')
+    print(f"📄 Parsing {len(lines)} lines of text")
     
-    # Simple pattern matching
     for line in lines:
         line_lower = line.lower()
         
@@ -77,33 +100,67 @@ def parse_fayda(text: str) -> dict:
             # Get next line or extract from this line
             parts = line.split()
             for i, part in enumerate(parts):
-                if "ሳሙኤል" in part or "samuel" in part_lower():
-                    data["name"] = " ".join(parts[i:i+3])
+                part_lower = part.lower()
+                if "ሳሙኤል" in part or "samuel" in part_lower:
+                    name_parts = parts[i:i+3]
+                    data["name"] = " ".join(name_parts)
+                    print(f"✅ Found name: {data['name']}")
                     break
         
         # Date of Birth
-        if "የትውልድ" in line or "date of birth" in line_lower:
-            import re
+        if "የትውልድ" in line or "date of birth" in line_lower or "dob" in line_lower:
             date_match = re.search(r'\d{2}/\d{2}/\d{4}', line)
             if date_match:
                 data["dob"] = date_match.group()
+                print(f"✅ Found DOB: {data['dob']}")
         
         # Phone
         if "ስልክ" in line or "phone" in line_lower:
-            import re
             phone_match = re.search(r'(\d{10})', line.replace(" ", ""))
             if phone_match:
                 data["phone"] = phone_match.group(1)
+                print(f"✅ Found phone: {data['phone']}")
         
         # FAN (16-digit number)
-        if "fan" in line_lower or "fcn" in line_lower:
-            import re
+        if "fan" in line_lower or "fcn" in line_lower or "ካርድ" in line:
             fan_match = re.search(r'(\d{16})', line.replace(" ", ""))
             if fan_match:
                 data["fan"] = fan_match.group(1)
+                print(f"✅ Found FAN: {data['fan']}")
+        
+        # FIN
+        if "fin" in line_lower:
+            fin_match = re.search(r'(\d{12,16})', line.replace(" ", ""))
+            if fin_match:
+                data["fin"] = fin_match.group(1)
+                print(f"✅ Found FIN: {data['fin']}")
+        
+        # Sex
+        if "sex" in line_lower or "ፆታ" in line:
+            if "male" in line_lower or "ወንድ" in line:
+                data["sex"] = "ወንድ | Male"
+                print(f"✅ Found sex: Male")
+            elif "female" in line_lower or "ሴት" in line:
+                data["sex"] = "ሴት | Female"
+                print(f"✅ Found sex: Female")
+        
+        # Nationality
+        if "ዜግነት" in line or "nationality" in line_lower:
+            if "ኢትዮጵያ" in line or "ethiopian" in line_lower:
+                data["nationality"] = "ኢትዮጵያ | Ethiopian"
+                print(f"✅ Found nationality")
+        
+        # Expiry
+        if "expiry" in line_lower or "የሚያበቃበት" in line:
+            expiry_match = re.search(r'\d{4}/\d{2}/\d{2}', line)
+            if expiry_match:
+                data["expiry"] = expiry_match.group()
+                print(f"✅ Found expiry: {data['expiry']}")
     
     return data
-  def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
+
+# ================= FULL ID GENERATION FUNCTION =================
+def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
     """Generate full ID card with template and extracted data."""
     print(f"\n🎨 GENERATING FULL ID CARD")
     print(f"   Template: {TEMPLATE_PATH}")
@@ -237,31 +294,45 @@ def parse_fayda(text: str) -> dict:
         import traceback
         traceback.print_exc()
         return False
-# ================= HELPER FUNCTIONS =================
+
+# ================= CLEANUP FUNCTION =================
 def cleanup_user_session(user_id: int):
     """Clean up user session and files."""
-    print(f"🧹 Cleaning user {user_id}")
+    print(f"🧹 Cleaning up user {user_id}")
+    
     if user_id in user_sessions:
-        # Delete files
-        import glob
-        patterns = [
-            f"/tmp/fayda_bot/user_{user_id}_*",
-            f"/tmp/user_{user_id}_*"
+        # Delete image files
+        for img_path in user_sessions[user_id].get("images", []):
+            if os.path.exists(img_path):
+                try:
+                    os.remove(img_path)
+                    print(f"   Deleted: {img_path}")
+                except:
+                    pass
+        
+        # Delete output files
+        output_patterns = [
+            f"/tmp/fayda_bot/user_{user_id}_*.png",
+            f"/tmp/user_{user_id}_*.png"
         ]
-        for pattern in patterns:
+        
+        for pattern in output_patterns:
             for file_path in glob.glob(pattern):
                 try:
                     os.remove(file_path)
+                    print(f"   Deleted: {file_path}")
                 except:
                     pass
+        
+        # Remove session
         del user_sessions[user_id]
-        print(f"✅ Cleaned up")
+        print(f"✅ Session cleaned up")
 
 # ================= BOT HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     user_id = update.effective_user.id
-    user_sessions[user_id] = {"images": [], "data": {}, "step": 0}
+    user_sessions[user_id] = {"images": [], "data": {}}
     print(f"🚀 New session for user {user_id}")
     
     await update.message.reply_text(
@@ -271,6 +342,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "I'll generate an ID card.",
         parse_mode='Markdown'
     )
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle photo uploads."""
     user_id = update.effective_user.id
@@ -295,6 +367,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_sessions[user_id]["images"].append(img_path)
         
         await update.message.reply_text(f"✅ Image {img_index + 1}/3 received")
+        print(f"   Saved: {img_path}")
         
         # Check if we have all 3
         if len(user_sessions[user_id]["images"]) == 3:
@@ -304,8 +377,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"❌ Error: {e}")
         await update.message.reply_text("❌ Error saving image")
+
 async def process_user_images(update: Update, user_id: int):
-   print("🔥🔥🔥 process_user_images IS BEING CALLED! 🔥🔥🔥")
     """Process all 3 images and generate FULL ID card."""
     try:
         print(f"\n🔄 PROCESSING FULL ID for user {user_id}")
@@ -344,14 +417,14 @@ async def process_user_images(update: Update, user_id: int):
             await update.message.reply_text("⚠️ No data found, using placeholder")
             # Add sample data for testing
             data = {
-                "name": "ሳሙኤል ቀነኒሳ | Samuel Kenenisa",
+                "name": "ሳሙኤል ቀነኒሳ ሰልባና | Samuel Kenenisa Selbana",
                 "dob": "07/10/1992",
                 "sex": "ወንድ | Male",
                 "expiry": "2026/05/21",
                 "fan": "5035 9289 3697 0958",
                 "phone": "0945660103",
                 "nationality": "ኢትዮጵያ | Ethiopian",
-                "address": "አዲስ አበባ, እቃቂ ቃሊቲ",
+                "address": "አዲስ አበባ, እቃቂ ቃሊቲ, ወረዳ 06",
                 "fin": "2536 8067 4305"
             }
             found_fields = list(data.keys())
@@ -389,22 +462,33 @@ async def process_user_images(update: Update, user_id: int):
     finally:
         # Cleanup
         cleanup_user_session(user_id)
+
 # ================= MAIN =================
 def main():
     """Start the bot."""
     print("🚀 Starting Fayda ID Bot...")
+    print("=" * 50)
+    
+    # Check files
+    print("🔍 Checking files:")
+    print(f"   Template: {TEMPLATE_PATH} - {'✅' if os.path.exists(TEMPLATE_PATH) else '❌'}")
+    print(f"   Font: {FONT_PATH} - {'✅' if os.path.exists(FONT_PATH) else '❌'}")
+    print("=" * 50)
     
     if not BOT_TOKEN:
         print("❌ ERROR: BOT_TOKEN not set!")
         return
     
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    
-    print("🤖 Bot is running...")
-    app.run_polling()
+    try:
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
+        
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+        
+        print("🤖 Bot is running...")
+        app.run_polling()
+    except Exception as e:
+        print(f"❌ Failed to start: {e}")
 
 if __name__ == "__main__":
     main()
