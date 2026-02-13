@@ -58,6 +58,143 @@ def ocr_space_api(image_path: str, language: str = 'eng') -> str:
     except Exception as e:
         print(f"❌ OCR failed: {e}")
         return ""
+def parse_fayda(text: str) -> dict:
+    """Extract ID information from OCR text."""
+    data = {
+        "name": "", "dob": "", "sex": "", "expiry": "",
+        "fan": "", "fin": "", "nationality": "", 
+        "address": "", "phone": ""
+    }
+    
+    lines = text.split('\n')
+    
+    # Simple pattern matching
+    for line in lines:
+        line_lower = line.lower()
+        
+        # Name
+        if "ሙሉ ስም" in line or "full name" in line_lower:
+            # Get next line or extract from this line
+            parts = line.split()
+            for i, part in enumerate(parts):
+                if "ሳሙኤል" in part or "samuel" in part_lower():
+                    data["name"] = " ".join(parts[i:i+3])
+                    break
+        
+        # Date of Birth
+        if "የትውልድ" in line or "date of birth" in line_lower:
+            import re
+            date_match = re.search(r'\d{2}/\d{2}/\d{4}', line)
+            if date_match:
+                data["dob"] = date_match.group()
+        
+        # Phone
+        if "ስልክ" in line or "phone" in line_lower:
+            import re
+            phone_match = re.search(r'(\d{10})', line.replace(" ", ""))
+            if phone_match:
+                data["phone"] = phone_match.group(1)
+        
+        # FAN (16-digit number)
+        if "fan" in line_lower or "fcn" in line_lower:
+            import re
+            fan_match = re.search(r'(\d{16})', line.replace(" ", ""))
+            if fan_match:
+                data["fan"] = fan_match.group(1)
+    
+    return data
+    def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
+    """Generate full ID card with template and extracted data."""
+    try:
+        # Check if template exists
+        if not os.path.exists(TEMPLATE_PATH):
+            print(f"❌ Template not found: {TEMPLATE_PATH}")
+            return False
+        
+        # Open template
+        template = Image.open(TEMPLATE_PATH).convert("RGBA")
+        draw = ImageDraw.Draw(template)
+        
+        # Load font
+        try:
+            if os.path.exists(FONT_PATH):
+                font = ImageFont.truetype(FONT_PATH, 40)
+                font_small = ImageFont.truetype(FONT_PATH, 30)
+            else:
+                font = ImageFont.load_default()
+                font_small = ImageFont.load_default()
+        except:
+            font = ImageFont.load_default()
+            font_small = ImageFont.load_default()
+        
+        # FRONT SIDE - Place text at your coordinates
+        # Full Name (x: 210, y: 1120)
+        if data.get("name"):
+            draw.text((210, 1120), data["name"][:40], fill="black", font=font)
+        
+        # Date of Birth (x: 210, y: 1235)
+        if data.get("dob"):
+            draw.text((210, 1235), data["dob"], fill="black", font=font)
+        
+        # Sex (x: 210, y: 1325)
+        if data.get("sex"):
+            draw.text((210, 1325), data["sex"], fill="black", font=font)
+        
+        # Expiry Date (x: 210, y: 1410)
+        if data.get("expiry"):
+            draw.text((210, 1410), data["expiry"], fill="black", font=font)
+        
+        # FAN (x: 210, y: 1515)
+        if data.get("fan"):
+            # Format with spaces
+            fan = data["fan"]
+            if len(fan) == 16:
+                fan = f"{fan[:4]} {fan[4:8]} {fan[8:12]} {fan[12:]}"
+            draw.text((210, 1515), fan, fill="black", font=font)
+        
+        # BACK SIDE
+        # Phone (x: 120, y: 1220)
+        if data.get("phone"):
+            draw.text((120, 1220), data["phone"], fill="black", font=font)
+        
+        # Nationality (x: 120, y: 1320)
+        if data.get("nationality"):
+            draw.text((120, 1320), data["nationality"], fill="black", font=font)
+        
+        # Address (x: 120, y: 1425)
+        if data.get("address"):
+            address = data["address"][:50]
+            draw.text((120, 1425), address, fill="black", font=font_small)
+        
+        # FIN (x: 760, y: 1220)
+        if data.get("fin"):
+            draw.text((760, 1220), data["fin"], fill="black", font=font)
+        
+        # Add Photo and QR Code
+        try:
+            if os.path.exists(photo_qr_path):
+                img = Image.open(photo_qr_path).convert("RGBA")
+                
+                # Crop Photo (160, 70, 560, 520)
+                photo = img.crop((160, 70, 560, 520))
+                photo = photo.resize((300, 380))
+                template.paste(photo, (120, 140), photo)
+                
+                # Crop QR Code (80, 650, 640, 1250)
+                qr = img.crop((80, 650, 640, 1250))
+                qr = qr.resize((520, 520))
+                template.paste(qr, (1470, 40), qr)
+        except Exception as img_err:
+            print(f"⚠️ Image placement error: {img_err}")
+        
+        # Save final image
+        template.save(output_path)
+        print(f"✅ Full ID generated: {output_path}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Generation failed: {e}")
+        return False
 
 # ================= HELPER FUNCTIONS =================
 def cleanup_user_session(user_id: int):
@@ -93,8 +230,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "I'll generate an ID card.",
         parse_mode='Markdown'
     )
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle photo uploads."""
     user_id = update.effective_user.id
     print(f"\n📸 Photo from user {user_id}")
@@ -127,43 +263,55 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"❌ Error: {e}")
         await update.message.reply_text("❌ Error processing image")
-
 async def process_user_images(update: Update, user_id: int):
-    """Process all 3 images for a user."""
+    """Process all 3 images and generate full ID card."""
     try:
-        print(f"\n🔄 Processing images for user {user_id}")
+        print(f"\n🔄 PROCESSING FULL ID for user {user_id}")
         
         if user_id not in user_sessions or len(user_sessions[user_id]["images"]) < 3:
             await update.message.reply_text("❌ Need 3 images")
             return
         
         images = user_sessions[user_id]["images"]
-        await update.message.reply_text("⏳ Processing...")
+        await update.message.reply_text("⏳ Generating your ID card...")
         
-        # Test OCR
+        # Step 1: OCR on front and back
+        print("🔍 Running OCR on front page...")
         front_text = ocr_space_api(images[0])
         
-        # Create test image
-        output_path = f"/tmp/fayda_bot/user_{user_id}_output.png"
-        test_img = Image.new('RGB', (800, 400), color='white')
-        draw = ImageDraw.Draw(test_img)
+        print("🔍 Running OCR on back page...")
+        back_text = ocr_space_api(images[1])
         
-        draw.text((10, 10), "Fayda ID Bot - Test", fill='black')
-        draw.text((10, 50), f"User: {user_id}", fill='blue')
-        draw.text((10, 90), f"OCR chars: {len(front_text)}", fill='green')
-        draw.text((10, 130), "✅ Bot is working!", fill='purple')
+        # Step 2: Parse the data
+        print("📋 Parsing ID information...")
+        data = parse_fayda(front_text + "\n" + back_text)
         
-        test_img.save(output_path)
+        # Step 3: Generate full ID card
+        print("🎨 Generating ID card with template...")
+        output_path = f"/tmp/fayda_bot/user_{user_id}_final.png"
         
-        # Send to user
-        with open(output_path, "rb") as photo_file:
-            await update.message.reply_photo(
-                photo=photo_file,
-                caption="🧪 *Test Output* - Bot is working!",
-                parse_mode='Markdown'
-            )
+        success = generate_full_id(
+            data,
+            images[2],  # Photo+QR image
+            output_path
+        )
         
-        print(f"✅ Processing complete")
+        if success:
+            # Count found fields
+            found_fields = [k for k, v in data.items() if v]
+            fields_text = ", ".join(found_fields[:5])
+            if len(found_fields) > 5:
+                fields_text += f" and {len(found_fields)-5} more"
+            
+            # Send the generated ID
+            with open(output_path, "rb") as photo_file:
+                await update.message.reply_photo(
+                    photo=photo_file,
+                    caption=f"✅ *Your Fayda ID is Ready!*\n📊 Found {len(found_fields)} fields: {fields_text}",
+                    parse_mode='Markdown'
+                )
+        else:
+            await update.message.reply_text("❌ Failed to generate ID card")
         
     except Exception as e:
         print(f"❌ Processing error: {e}")
@@ -171,7 +319,6 @@ async def process_user_images(update: Update, user_id: int):
     
     finally:
         cleanup_user_session(user_id)
-
 # ================= MAIN =================
 def main():
     """Start the bot."""
