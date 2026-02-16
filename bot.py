@@ -175,6 +175,7 @@ def parse_fayda(text: str) -> dict:
     return data
 # ================= FULL ID GENERATION FUNCTION =================
 def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
+   print("TEMPLATE SIZE:", template.size)
     """Generate full ID card with guaranteed visible text + debug boxes."""
 
     try:
@@ -259,7 +260,6 @@ def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
     except Exception as e:
         print("❌ Generation failed:", e)
         return False
-        print("TEMPLATE SIZE:", template.size)
 # ================= CLEANUP FUNCTION =================
 def cleanup_user_session(user_id: int):
     """Clean up user session and files."""
