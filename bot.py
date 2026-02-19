@@ -188,9 +188,26 @@ def generate_full_id(data: dict, photo_qr_path: str, output_path: str):
         template = Image.open(TEMPLATE_PATH).convert("RGBA")
         draw = ImageDraw.Draw(template)
 
-        W, H = template.size
-        print("Template size:", W, H)
+       positions = {
+    "full_name": (620, 220),
+    "date_of_birth": (620, 365),
+    "sex": (620, 440),
+    "date_of_expiry": (620, 520),
+    "fan": (230, 920),
+    "date_of_issue": (25, 450),
 
+    "phone": (1180, 140),
+    "nationality": (1180, 250),
+    "address": (1180, 380),
+    "fin": (1180, 950),
+    "sin": (1630, 950),
+
+    "photo": (95, 245),
+    "qr": (1500, 100)
+}
+
+photo_size = (360, 420)
+qr_size = (430, 430)
         # ---------- FONT ----------
         try:
             font = ImageFont.truetype(FONT_PATH, int(H * 0.03))
